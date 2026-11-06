@@ -204,4 +204,4 @@ Contributions, bug reports, and suggestions are welcome. Before opening a pull r
 
 ## License
 
-No license file was included in the supplied project archive. Until a license is added to the repository, do not assume that the source code is licensed for reuse or redistribution.
+Tender is released under the [MIT License](LICENSE).

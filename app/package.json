@@ -57,6 +57,7 @@
   "main": "out/main/index.js",
   "description": "A small desktop GUI for the Docker Engine you already run.",
   "author": "jluispbraga",
+  "license": "MIT",
   "homepage": "https://github.com/jluispbraga/Harbor",
   "build": {
     "appId": "io.github.jluispbraga.tender",
