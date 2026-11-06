@@ -39,7 +39,7 @@ export function localCandidates(platform: NodeJS.Platform = process.platform, en
  * DOCKER_CONTEXT or the current context in ~/.docker/config.json, then the
  * platform's default local endpoint. Only reads files; never writes Docker's config.
  */
-export function resolveEndpoint(env = process.env, dockerDir = join(homedir(), '.docker'), platform: NodeJS.Platform = process.platform, exists = existsSync, home = homedir()): Endpoint {
+export function resolveEndpoint(env = process.env, dockerDir = env.DOCKER_CONFIG || join(homedir(), '.docker'), platform: NodeJS.Platform = process.platform, exists = existsSync, home = homedir()): Endpoint {
   if (env.DOCKER_HOST) return make('DOCKER_HOST', env.DOCKER_HOST, 'the DOCKER_HOST environment variable')
 
   let context = env.DOCKER_CONTEXT

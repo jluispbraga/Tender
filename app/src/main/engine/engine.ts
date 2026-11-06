@@ -75,6 +75,8 @@ export class Engine {
   /** Why the WSL fallback found nothing, added to the unreachable message. */
   private wslMiss: string | null = null
   private discovering: Promise<void> | null = null
+  /** The pipe the WSL bridge stands in for: when it comes back (Docker Desktop started), switch back to it. */
+  private bridged: string | null = null
 
   get currentEndpoint() {
     return this.endpoint
@@ -115,19 +117,21 @@ export class Engine {
   private closeBridge() {
     this.bridge?.close()
     this.bridge = null
+    this.bridged = null
   }
 
   /**
-   * Windows only: when Tender would fall back to the default pipe and nothing
-   * listens there, look for a Docker Engine inside a running WSL distribution
-   * and bridge to it. DOCKER_HOST and contexts always win over this.
+   * Windows only: when the engine should be behind a named pipe that does not
+   * exist (the default pipe, or a context Docker Desktop left behind after it
+   * quit or was uninstalled), look for a Docker Engine inside a running WSL
+   * distribution and bridge to it. An explicit DOCKER_HOST is never second-guessed.
    */
   private async discoverWsl() {
-    if (process.platform !== 'win32' || this.endpoint.name !== 'default' || this.endpoint.address !== WINDOWS_PIPE) return
+    if (process.platform !== 'win32' || this.endpoint.kind !== 'npipe' || this.endpoint.name === 'DOCKER_HOST' || this.endpoint.socketPath) return
     // Dev only: pretend the default pipe is missing, to exercise this path next to Docker Desktop.
-    const pipe = !app.isPackaged && process.env.TENDER_DEFAULT_PIPE ? process.env.TENDER_DEFAULT_PIPE : 'docker_engine'
+    if (this.endpoint.address === WINDOWS_PIPE && !app.isPackaged && process.env.TENDER_DEFAULT_PIPE) this.endpoint = { ...this.endpoint, address: `npipe:////./pipe/${process.env.TENDER_DEFAULT_PIPE}` }
+    const pipe = this.endpoint.address.replace(/^npipe:\/\/\/\/\.\/pipe\//, '')
     if (pipeExists(pipe)) return
-    if (pipe !== 'docker_engine') this.endpoint = { ...this.endpoint, address: `npipe:////./pipe/${pipe}` }
     const r = await findWslEngine()
     if (!r.found) {
       this.wslMiss = r.why
@@ -135,7 +139,8 @@ export class Engine {
     }
     this.wslMiss = null
     this.bridge = await WslBridge.open(r.found.distro)
-    this.endpoint = { name: `wsl:${r.found.distro}`, kind: 'npipe', address: `wsl://${r.found.distro}`, source: `Docker in WSL (${r.found.distro})`, socketPath: this.bridge.pipe }
+    this.bridged = pipe
+    this.endpoint = { name: `wsl:${r.found.distro}`, kind: 'npipe', address: `wsl://${r.found.distro}`, source: `Docker in WSL (${r.found.distro}), since ${this.endpoint.address} is missing`, socketPath: this.bridge.pipe }
   }
 
   async reconnect(): Promise<EngineStatus> {
@@ -181,7 +186,9 @@ export class Engine {
         containersRunning: info.ContainersRunning,
       })
       if (!this.eventStream) void this.watchEvents()
-      this.schedulePing(15_000)
+      // The engine Tender was told to use is back: prefer it over the WSL stand-in.
+      if (this.bridged && pipeExists(this.bridged)) void this.reconnect()
+      else this.schedulePing(15_000)
     } catch (e) {
       this.docker = null
       this.eventStream?.destroy()
