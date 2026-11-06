@@ -76,8 +76,8 @@ On Windows, any Docker Engine that exposes a compatible endpoint can be used, fo
 Clone the repository and install its dependencies:
 
 ```bash
-git clone https://github.com/jluispbraga/Harbor.git
-cd Harbor
+git clone https://github.com/jluispbraga/Tender.git
+cd Tender
 npm install
 ```
 
