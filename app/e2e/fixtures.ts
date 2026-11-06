@@ -39,6 +39,6 @@ export { expect }
 
 /** The fake engine's test hook (only exists in the browser build). */
 export const setEngine = (page: Page, state: 'running' | 'stopped' | 'error', error?: string) =>
-  page.evaluate(([s, e]) => (window as unknown as { __harborFake: { setEngine(s: string, e?: string): void } }).__harborFake.setEngine(s!, e), [state, error] as const)
+  page.evaluate(([s, e]) => (window as unknown as { __tenderFake: { setEngine(s: string, e?: string): void } }).__tenderFake.setEngine(s!, e), [state, error] as const)
 
 export const row = (page: Page, table: string, text: string | RegExp) => page.getByRole('table', { name: table }).getByRole('row').filter({ hasText: text })

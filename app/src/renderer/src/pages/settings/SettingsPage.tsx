@@ -75,8 +75,8 @@ function GeneralSection() {
         </Field>
       </Group>
       <Group title="Startup">
-        <Switch label="Start Harbor when I sign in to Windows" checked={s.start_on_login} onCheckedChange={(v) => void save('start_on_login', v)} />
-        <Switch label="Open the window when Harbor starts" checked={s.open_on_start} onCheckedChange={(v) => void save('open_on_start', v)} />
+        <Switch label="Start Tender when I sign in to Windows" checked={s.start_on_login} onCheckedChange={(v) => void save('start_on_login', v)} />
+        <Switch label="Open the window when Tender starts" checked={s.open_on_start} onCheckedChange={(v) => void save('open_on_start', v)} />
         <Switch label="Keep running in the notification area when the window is closed" checked={s.tray_enabled} onCheckedChange={(v) => void save('tray_enabled', v)} />
       </Group>
       <Group title="Containers">
@@ -140,7 +140,7 @@ function EngineSection() {
         </dl>
       </Group>
       <p className="text-sm text-muted">
-        Harbor uses an engine you already run. Connecting to other engines and editing the engine’s configuration file are planned for a later milestone.
+        Tender uses an engine you already run. Connecting to other engines and editing the engine’s configuration file are planned for a later milestone.
       </p>
     </div>
   )

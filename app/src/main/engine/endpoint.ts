@@ -8,7 +8,7 @@ export interface Endpoint {
   /** Context name, "DOCKER_HOST" or "default". */
   name: string
   kind: 'npipe' | 'tcp' | 'ssh'
-  /** As the Docker CLI writes it, e.g. npipe:////./pipe/dockerDesktopLinuxEngine */
+  /** As the Docker CLI writes it, e.g. npipe:////./pipe/docker_engine */
   address: string
   /** Where the address came from, shown on S01 and S23. */
   source: string

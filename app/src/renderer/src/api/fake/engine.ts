@@ -6,7 +6,7 @@ import {
   type EngineStatus,
   type GridPrefs,
   type GridView,
-  type HarborApi,
+  type TenderApi,
   type ImageRow,
   type LayerProgress,
   type LogLine,
@@ -28,7 +28,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const now = () => new Date().toISOString()
 const rid = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('')
 
-export function createFakeApi(): HarborApi {
+export function createFakeApi(): TenderApi {
   let containers: ContainerRow[] = structuredClone(seedContainers)
   let images: ImageRow[] = structuredClone(seedImages)
   let volumes: VolumeRow[] = structuredClone(seedVolumes)
@@ -229,7 +229,7 @@ export function createFakeApi(): HarborApi {
   const pulls = new Map<string, { cancel: () => void }>()
   const activePullByRef = new Map<string, string>()
 
-  const api: HarborApi = {
+  const api: TenderApi = {
     kind: 'fake',
     engine: {
       async status() {
@@ -562,7 +562,7 @@ export function createFakeApi(): HarborApi {
   }
 
   // Test hooks for engine states (S01). Only exist in the fake.
-  ;(window as unknown as { __harborFake: unknown }).__harborFake = {
+  ;(window as unknown as { __tenderFake: unknown }).__tenderFake = {
     setEngine: (state: EngineStatus['state'], error?: string) => setEngine({ state, error }),
   }
 

@@ -50,7 +50,7 @@ function dedupePorts(ports: Docker.Port[]): PortBinding[] {
 }
 
 /**
- * Everything Harbor asks of Docker Engine, over its public API (dockerode).
+ * Everything Tender asks of Docker Engine, over its public API (dockerode).
  * One instance per app. Keeps the connection healthy (ping job), relays the
  * engine's event stream, and owns every long-lived stream (logs, stats,
  * exec, pulls) so they can be torn down when the renderer goes away.
@@ -65,7 +65,7 @@ export class Engine {
   private statusListeners = new Set<Listener<EngineStatus>>()
   private eventListeners = new Set<Listener<EngineEvent[]>>()
   private dieListeners = new Set<Listener<{ id: string; name: string; exitCode: number }>>()
-  /** Containers Harbor itself is stopping: their exit is expected, not a notification. */
+  /** Containers Tender itself is stopping: their exit is expected, not a notification. */
   private stopping = new Set<string>()
   private hostArch = 'amd64'
 
@@ -87,7 +87,7 @@ export class Engine {
     return () => this.eventListeners.delete(fn)
   }
 
-  /** An unexpected container exit (non-zero code, not a stop Harbor asked for). */
+  /** An unexpected container exit (non-zero code, not a stop Tender asked for). */
   onUnexpectedExit(fn: Listener<{ id: string; name: string; exitCode: number }>) {
     this.dieListeners.add(fn)
     return () => this.dieListeners.delete(fn)
@@ -408,7 +408,7 @@ export class Engine {
         // An empty history still answers, so the UI can leave "Loading".
         setTimeout(() => !closed && pending.length === 0 && cb([]), 300)
       } catch (e) {
-        if (!closed) cb([{ ts: new Date().toISOString(), stream: 'stderr', text: `Harbor couldn’t read these logs: ${toApiError(e).message}` }])
+        if (!closed) cb([{ ts: new Date().toISOString(), stream: 'stderr', text: `Tender couldn’t read these logs: ${toApiError(e).message}` }])
       }
     })()
     return () => {
@@ -610,7 +610,7 @@ export class Engine {
   /**
    * Pulls an image, reporting per-layer progress. Resolves when done, rejects
    * with the registry's message (not found, auth required) or when cancelled.
-   * Public images only: Harbor doesn't read Docker's credential helpers.
+   * Public images only: Tender doesn't read Docker's credential helpers.
    */
   pull(reference: string, onProgress: (layers: LayerProgress[]) => void): { done: Promise<void>; cancel: () => void } {
     let stream: Readable | null = null

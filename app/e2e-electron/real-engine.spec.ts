@@ -15,7 +15,7 @@ const errors: string[] = []
 test.beforeAll(async () => {
   app = await electron.launch({
     args: ['out/main/index.js'],
-    env: { ...process.env, HARBOR_DB_PATH: join(mkdtempSync(join(tmpdir(), 'harbor-e2e-')), 'harbor.db') },
+    env: { ...process.env, TENDER_DB_PATH: join(mkdtempSync(join(tmpdir(), 'tender-e2e-')), 'tender.db') },
   })
   page = await app.firstWindow()
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
@@ -49,14 +49,14 @@ test('E-1 the real engine is reached and every list renders real rows', async ()
 
 test('E-2 the page has no Node access and the IPC layer rejects bad input', async () => {
   const r = await page.evaluate(async () => {
-    const out: Record<string, unknown> = { require: typeof (window as any).require, process: typeof (window as any).process, kind: (window as any).harbor.kind }
+    const out: Record<string, unknown> = { require: typeof (window as any).require, process: typeof (window as any).process, kind: (window as any).tender.kind }
     try {
-      await (window as any).harbor.containers.action([], 'start')
+      await (window as any).tender.containers.action([], 'start')
     } catch (e) {
       out.bad = { message: (e as Error).message, status: (e as { status?: number }).status }
     }
     try {
-      await (window as any).harbor.containers.openPort({ publicPort: 8080, protocol: 'udp' })
+      await (window as any).tender.containers.openPort({ publicPort: 8080, protocol: 'udp' })
     } catch (e) {
       out.badPort = (e as { status?: number }).status
     }

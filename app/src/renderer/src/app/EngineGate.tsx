@@ -48,13 +48,13 @@ export function EngineGate({ children }: { children: ReactNode }) {
           {starting ? <Loader2 className="animate-spin" /> : s?.state === 'stopped' ? <PlugZap /> : <Unplug />}
         </div>
         <h1 id="engine-title" className="text-xl text-fg">
-          {starting ? 'Connecting to the engine…' : s?.state === 'stopped' ? 'The Docker engine is stopped' : 'Harbor can’t reach the Docker engine'}
+          {starting ? 'Connecting to the engine…' : s?.state === 'stopped' ? 'The Docker engine is stopped' : 'Tender can’t reach the Docker engine'}
         </h1>
         <p role="status" className="text-base text-muted">
           {starting
             ? 'This usually takes a few seconds after the engine starts.'
             : s?.state === 'stopped'
-              ? 'Start Docker Engine (for example in WSL 2, or Docker Desktop if you have it), then retry.'
+              ? 'Start your Docker engine wherever you run it (WSL 2, a VM, another machine), then retry. Tender never starts or changes it for you.'
               : `Tried ${s?.endpoint ?? 'the default pipe'}. Make sure an engine is running and that this Windows user may use it.`}
         </p>
         {s?.error && !starting && <p className="rounded-md bg-danger-bg px-3 py-2 font-mono text-sm text-danger">{s.error}</p>}

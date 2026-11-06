@@ -1,4 +1,4 @@
--- Local app state for the Docker Desktop clone. Migration 0001.
+-- Local app state for Tender. Migration 0001.
 --
 -- The Docker Engine is the source of truth for containers, images and
 -- volumes; none of them are stored here. This SQLite file only holds what the

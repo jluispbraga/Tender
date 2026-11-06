@@ -1,8 +1,8 @@
 // Read-only smoke test against the real engine: lists, inspects and reads
-// logs, changes nothing in Docker. Local settings go to HARBOR_DB_PATH.
-// Run: HARBOR_SMOKE=scripts/smoke-readonly.js HARBOR_DB_PATH=<tmp db> npx electron-vite dev
+// logs, changes nothing in Docker. Local settings go to TENDER_DB_PATH.
+// Run: TENDER_SMOKE=scripts/smoke-readonly.js TENDER_DB_PATH=<tmp db> npx electron-vite dev
 ;(async () => {
-  const h = window.harbor
+  const h = window.tender
   const r = { kind: h?.kind }
   const t = async (name, fn) => {
     const t0 = performance.now()

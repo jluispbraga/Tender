@@ -59,7 +59,7 @@ test.describe('F01 read a container’s logs', () => {
   test('F01-E6 engine going away shows the gate; Retry brings the logs back', async ({ page, open, scan }) => {
     await open('#/containers/b7c2e9f0a1b2c3d4/logs')
     await setEngine(page, 'error', 'open //./pipe/docker_engine: The system cannot find the file specified.')
-    await expect(page.getByRole('heading', { name: 'Harbor can’t reach the Docker engine' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Tender can’t reach the Docker engine' })).toBeVisible()
     await expect(page.getByText('The system cannot find the file specified.')).toBeVisible()
     await scan('S01 engine unreachable')
     await page.getByRole('button', { name: 'Retry' }).click()

@@ -7,22 +7,22 @@ import trayIcon from '../../resources/tray.png?asset'
 import trayIcon2x from '../../resources/tray@2x.png?asset'
 import appIcon from '../../resources/icon.png?asset'
 
-// Harbor's main process: one window, one engine connection, one local store.
+// Tender's main process: one window, one engine connection, one local store.
 
 const devUrl = process.env.ELECTRON_RENDERER_URL
 const startHidden = process.argv.includes('--hidden')
 
-// Dev smoke runs (HARBOR_SMOKE) get their own profile and skip the
-// single-instance lock, so they work while a normal Harbor window is open.
-const smoke = !!process.env.HARBOR_SMOKE && !app.isPackaged
-if (smoke) app.setPath('userData', join(app.getPath('temp'), `harbor-smoke-${process.pid}`))
+// Dev smoke runs (TENDER_SMOKE) get their own profile and skip the
+// single-instance lock, so they work while a normal Tender window is open.
+const smoke = !!process.env.TENDER_SMOKE && !app.isPackaged
+if (smoke) app.setPath('userData', join(app.getPath('temp'), `tender-smoke-${process.pid}`))
 else if (!app.requestSingleInstanceLock()) app.quit()
 
 let win: BrowserWindow | null = null
 let tray: Tray | null = null
 let quitting = false
 
-const store = new Store(process.env.HARBOR_DB_PATH || join(app.getPath('userData'), 'harbor.db'))
+const store = new Store(process.env.TENDER_DB_PATH || join(app.getPath('userData'), 'tender.db'))
 const engine = new Engine()
 
 function trusted(e: IpcMainInvokeEvent) {
@@ -39,7 +39,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 600,
     show: false,
-    title: 'Harbor',
+    title: 'Tender',
     icon: appIcon,
     // Matches the bg token so there's no white flash before the page paints.
     backgroundColor: dark ? '#16181d' : '#ffffff',
@@ -61,7 +61,7 @@ function createWindow() {
     if (!(devUrl ? url.startsWith(devUrl) : url.startsWith('file://'))) e.preventDefault()
   })
   win.on('close', (e) => {
-    // With the tray on, closing the window keeps Harbor running (S25).
+    // With the tray on, closing the window keeps Tender running (S25).
     if (!quitting && store.settings().tray_enabled) {
       e.preventDefault()
       win?.hide()
@@ -88,13 +88,13 @@ function trayMenu() {
   return Menu.buildFromTemplate([
     { label, enabled: false },
     { type: 'separator' },
-    { label: 'Open Harbor', click: () => showWindow() },
+    { label: 'Open Tender', click: () => showWindow() },
     { label: 'Containers', click: () => showWindow('#/containers') },
     { label: 'Images', click: () => showWindow('#/images') },
     { label: 'Reconnect to the engine', click: () => void engine.reconnect() },
     { type: 'separator' },
     { label: 'Settings', click: () => showWindow('#/settings/general') },
-    { label: 'Quit Harbor', click: () => ((quitting = true), app.quit()) },
+    { label: 'Quit Tender', click: () => ((quitting = true), app.quit()) },
   ])
 }
 
@@ -108,7 +108,7 @@ function setupTray(enabled: boolean) {
   const img = nativeImage.createFromPath(trayIcon)
   img.addRepresentation({ scaleFactor: 2, buffer: nativeImage.createFromPath(trayIcon2x).toPNG() })
   tray = new Tray(img)
-  tray.setToolTip('Harbor')
+  tray.setToolTip('Tender')
   tray.setContextMenu(trayMenu())
   tray.on('click', () => showWindow())
 }
@@ -155,26 +155,26 @@ app.whenReady().then(() => {
   setupTray(settings.tray_enabled)
   applyLoginItem(settings.start_on_login)
 
-  // Dev only: HARBOR_SMOKE=<file> runs that script in the page against
-  // window.harbor, prints the result between markers and quits.
-  if (process.env.HARBOR_SMOKE && !app.isPackaged) {
+  // Dev only: TENDER_SMOKE=<file> runs that script in the page against
+  // window.tender, prints the result between markers and quits.
+  if (process.env.TENDER_SMOKE && !app.isPackaged) {
     win!.webContents.once('did-finish-load', async () => {
       const { readFileSync } = await import('node:fs')
       let out: unknown
       try {
-        out = await win!.webContents.executeJavaScript(readFileSync(process.env.HARBOR_SMOKE!, 'utf8'))
+        out = await win!.webContents.executeJavaScript(readFileSync(process.env.TENDER_SMOKE!, 'utf8'))
       } catch (e) {
         out = { smokeError: String(e) }
       }
-      // HARBOR_SHOTS=<dir>: also capture each listed route (comma-separated hashes).
-      if (process.env.HARBOR_SHOTS) {
+      // TENDER_SHOTS=<dir>: also capture each listed route (comma-separated hashes).
+      if (process.env.TENDER_SHOTS) {
         const { writeFileSync } = await import('node:fs')
-        const [w, h] = (process.env.HARBOR_SHOT_SIZE ?? '1280x800').split('x').map(Number)
+        const [w, h] = (process.env.TENDER_SHOT_SIZE ?? '1280x800').split('x').map(Number)
         win!.setContentSize(w, h)
-        for (const [i, hash] of (process.env.HARBOR_SHOT_ROUTES ?? '#/containers').split(',').entries()) {
+        for (const [i, hash] of (process.env.TENDER_SHOT_ROUTES ?? '#/containers').split(',').entries()) {
           await win!.webContents.executeJavaScript(`location.hash = ${JSON.stringify(hash)}`)
           await new Promise((r) => setTimeout(r, 3500))
-          writeFileSync(join(process.env.HARBOR_SHOTS, `${String(i).padStart(2, '0')}-${hash.replace(/[^a-z0-9]+/gi, '_')}.png`), (await win!.webContents.capturePage()).toPNG())
+          writeFileSync(join(process.env.TENDER_SHOTS, `${String(i).padStart(2, '0')}-${hash.replace(/[^a-z0-9]+/gi, '_')}.png`), (await win!.webContents.capturePage()).toPNG())
         }
       }
       process.stdout.write(`\n@@SMOKE@@${JSON.stringify(out)}@@END@@\n`)

@@ -29,7 +29,7 @@ export function TroubleshootPage() {
   }
 
   const summary = [
-    `Harbor (data layer: ${api.kind})`,
+    `Tender (data layer: ${api.kind})`,
     `Engine endpoint: ${e?.endpoint ?? 'unknown'}`,
     `Engine state: ${e?.state ?? 'unknown'}${e?.error ? ` (${e.error})` : ''}`,
     `Engine version: ${e?.version ?? 'unknown'} / API ${e?.apiVersion ?? 'unknown'}`,
@@ -73,8 +73,8 @@ export function TroubleshootPage() {
             <Card title="Simulate engine states (development only)">
               <p className="text-sm text-muted">The app is running on the built-in fake engine. Use these to check the engine screens.</p>
               <div className="flex gap-2">
-                <Button onClick={() => (window as unknown as { __harborFake: { setEngine: (s: string, e?: string) => void } }).__harborFake.setEngine('error', 'open //./pipe/docker_engine: The system cannot find the file specified.')}>Unreachable</Button>
-                <Button onClick={() => (window as unknown as { __harborFake: { setEngine: (s: string) => void } }).__harborFake.setEngine('stopped')}>Stopped</Button>
+                <Button onClick={() => (window as unknown as { __tenderFake: { setEngine: (s: string, e?: string) => void } }).__tenderFake.setEngine('error', 'open //./pipe/docker_engine: The system cannot find the file specified.')}>Unreachable</Button>
+                <Button onClick={() => (window as unknown as { __tenderFake: { setEngine: (s: string) => void } }).__tenderFake.setEngine('stopped')}>Stopped</Button>
               </div>
             </Card>
           )}

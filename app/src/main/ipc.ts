@@ -5,10 +5,10 @@ import type { Store } from './db'
 import { toApiError, type Engine } from './engine/engine'
 
 // The IPC surface from architecture.md ("API"). Three channels:
-//   harbor:call   (route, args)         -> { ok, value } | { ok: false, error }
-//   harbor:sub    (subId, kind, args)   -> starts a stream, pushed on harbor:push
-//   harbor:unsub  (subId)
-// plus harbor:exec for terminal input. Every input is validated with zod.
+//   tender:call   (route, args)         -> { ok, value } | { ok: false, error }
+//   tender:sub    (subId, kind, args)   -> starts a stream, pushed on tender:push
+//   tender:unsub  (subId)
+// plus tender:exec for terminal input. Every input is validated with zod.
 
 const id = z.string().min(1).max(200)
 const ids = z.array(id).min(1).max(500)
@@ -107,7 +107,7 @@ export function registerIpc(deps: IpcDeps) {
     },
   }
 
-  ipcMain.handle('harbor:call', async (e, route: unknown, args: unknown) => {
+  ipcMain.handle('tender:call', async (e, route: unknown, args: unknown) => {
     if (!deps.isTrustedSender(e)) return { ok: false, error: { message: 'Untrusted sender' } }
     const r = typeof route === 'string' ? routes[route] : undefined
     if (!r) return { ok: false, error: { message: `Unknown route ${String(route)}` } }
@@ -125,7 +125,7 @@ export function registerIpc(deps: IpcDeps) {
 
   const subs = new Map<string, { wc: WebContents; stop: () => void; exec?: { write(d: string): void; resize(c: number, r: number): void; close(): void } }>()
   const push = (wc: WebContents, subId: string, payload: unknown) => {
-    if (!wc.isDestroyed()) wc.send('harbor:push', subId, payload)
+    if (!wc.isDestroyed()) wc.send('tender:push', subId, payload)
   }
   const stopAll = (wc: WebContents) => {
     for (const [k, s] of subs) if (s.wc === wc) (s.stop(), subs.delete(k))
@@ -141,15 +141,15 @@ export function registerIpc(deps: IpcDeps) {
     pull: z.tuple([z.string().regex(/^[a-z0-9][a-z0-9._\/:@-]{0,255}$/i, 'That isn’t a valid image reference.')]),
   }
 
-  ipcMain.handle('harbor:sub', async (e, subId: unknown, kind: unknown, args: unknown) => {
+  ipcMain.handle('tender:sub', async (e, subId: unknown, kind: unknown, args: unknown) => {
     if (!deps.isTrustedSender(e)) return { ok: false, error: { message: 'Untrusted sender' } }
     if (typeof subId !== 'string' || subId.length > 64 || subs.has(subId) || typeof kind !== 'string' || !(kind in subArgs)) return { ok: false, error: { message: 'Bad subscription' } }
     const parsed = subArgs[kind as keyof typeof subArgs].safeParse(args)
     if (!parsed.success) return { ok: false, error: { message: parsed.error.issues.map((i) => i.message).join('; '), status: 400 } }
     const a = parsed.data as any[]
     const wc = e.sender
-    if (!wc.listenerCount('destroyed') || !(wc as unknown as { __harbor?: boolean }).__harbor) {
-      ;(wc as unknown as { __harbor?: boolean }).__harbor = true
+    if (!wc.listenerCount('destroyed') || !(wc as unknown as { __tender?: boolean }).__tender) {
+      ;(wc as unknown as { __tender?: boolean }).__tender = true
       wc.on('destroyed', () => stopAll(wc))
       // A reload starts a fresh renderer: drop the old one's streams.
       wc.on('did-start-navigation', (_ev, _url, _inPlace, isMainFrame) => isMainFrame && stopAll(wc))
@@ -214,13 +214,13 @@ export function registerIpc(deps: IpcDeps) {
     }
   })
 
-  ipcMain.handle('harbor:unsub', (e, subId: unknown) => {
+  ipcMain.handle('tender:unsub', (e, subId: unknown) => {
     if (!deps.isTrustedSender(e) || typeof subId !== 'string') return
     subs.get(subId)?.stop()
     subs.delete(subId)
   })
 
-  ipcMain.on('harbor:exec', (e, subId: unknown, op: unknown, a: unknown, b: unknown) => {
+  ipcMain.on('tender:exec', (e, subId: unknown, op: unknown, a: unknown, b: unknown) => {
     if (!deps.isTrustedSender(e as unknown as IpcMainInvokeEvent) || typeof subId !== 'string') return
     const s = subs.get(subId)?.exec
     if (!s) return

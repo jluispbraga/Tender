@@ -50,9 +50,9 @@ export function AppShell({ section, children }: { section: string; children: Rea
       <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line bg-surface px-4">
         <a href={href('containers')} className="flex w-[196px] items-center gap-2 rounded-sm font-semibold text-fg">
           <span aria-hidden className="grid size-6 place-items-center rounded-md bg-accent text-xs text-on-accent">
-            H
+            T
           </span>
-          Harbor
+          Tender
         </a>
         <button
           type="button"

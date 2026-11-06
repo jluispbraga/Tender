@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { HarborApi, LayerProgress } from '../renderer/src/api/types'
+import type { TenderApi, LayerProgress } from '../renderer/src/api/types'
 
-// window.harbor: the real implementation of HarborApi, over IPC. The renderer
+// window.tender: the real implementation of TenderApi, over IPC. The renderer
 // gets these functions and nothing else; no Node, no ipcRenderer.
 
 // contextBridge copies Error objects without their extra fields, so failures
@@ -12,13 +12,13 @@ const apiError = (message: string, status?: number) => ({ name: 'ApiError', mess
 type Envelope<T> = { ok: true; value: T } | { ok: false; error: { message: string; status?: number } }
 
 async function call<T>(route: string, ...args: unknown[]): Promise<T> {
-  const r = (await ipcRenderer.invoke('harbor:call', route, args)) as Envelope<T>
+  const r = (await ipcRenderer.invoke('tender:call', route, args)) as Envelope<T>
   if (!r.ok) throw apiError(r.error.message, r.error.status)
   return r.value
 }
 
 const handlers = new Map<string, (payload: any) => void>()
-ipcRenderer.on('harbor:push', (_e, subId: string, payload: unknown) => handlers.get(subId)?.(payload))
+ipcRenderer.on('tender:push', (_e, subId: string, payload: unknown) => handlers.get(subId)?.(payload))
 
 let n = 0
 const newId = () => `${Date.now().toString(36)}-${(n++).toString(36)}`
@@ -27,7 +27,7 @@ const newId = () => `${Date.now().toString(36)}-${(n++).toString(36)}`
 function subscribe(kind: string, args: unknown[], onPayload: (p: any) => void): { id: string; ready: Promise<void>; stop: () => void } {
   const id = newId()
   handlers.set(id, onPayload)
-  const ready = (ipcRenderer.invoke('harbor:sub', id, kind, args) as Promise<Envelope<void>>).then((r) => {
+  const ready = (ipcRenderer.invoke('tender:sub', id, kind, args) as Promise<Envelope<void>>).then((r) => {
     if (!r.ok) {
       handlers.delete(id)
       throw apiError(r.error.message, r.error.status)
@@ -38,18 +38,18 @@ function subscribe(kind: string, args: unknown[], onPayload: (p: any) => void): 
     ready,
     stop: () => {
       handlers.delete(id)
-      void ipcRenderer.invoke('harbor:unsub', id)
+      void ipcRenderer.invoke('tender:unsub', id)
     },
   }
 }
 
 /** For fire-and-forget streams the renderer can't await: log the failure, don't crash. */
 const quiet = (s: { ready: Promise<void>; stop: () => void }) => {
-  s.ready.catch((e) => console.warn('[harbor] subscription failed:', e.message))
+  s.ready.catch((e) => console.warn('[tender] subscription failed:', e.message))
   return s.stop
 }
 
-const harbor: HarborApi = {
+const tender: TenderApi = {
   kind: 'ipc',
   engine: {
     status: () => call('engine.status'),
@@ -78,8 +78,8 @@ const harbor: HarborApi = {
       const s = subscribe('exec', [id, shell, cols, rows], (p: { type: 'data'; data: string } | { type: 'exit'; code: number }) => (p.type === 'data' ? onData(p.data) : onExit(p.code)))
       await s.ready
       return {
-        write: (data) => ipcRenderer.send('harbor:exec', s.id, 'write', data),
-        resize: (c, r) => ipcRenderer.send('harbor:exec', s.id, 'resize', c, r),
+        write: (data) => ipcRenderer.send('tender:exec', s.id, 'write', data),
+        resize: (c, r) => ipcRenderer.send('tender:exec', s.id, 'resize', c, r),
         close: s.stop,
       }
     },
@@ -133,4 +133,4 @@ const harbor: HarborApi = {
   },
 }
 
-contextBridge.exposeInMainWorld('harbor', harbor)
+contextBridge.exposeInMainWorld('tender', tender)

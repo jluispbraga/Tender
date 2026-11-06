@@ -1,6 +1,6 @@
 // The renderer's whole view of the outside world. It mirrors the IPC surface
 // in replica/architecture.md. Two implementations: the fake engine in
-// ./fake (now) and window.harbor from the Electron preload (replica-backend).
+// ./fake (now) and window.tender from the Electron preload (replica-backend).
 // Screens import `api` from ./index and never know which one they got.
 
 export type EngineState = 'running' | 'starting' | 'stopped' | 'error'
@@ -194,7 +194,7 @@ export interface RecentItem {
 
 type Unsub = () => void
 
-export interface HarborApi {
+export interface TenderApi {
   /** 'fake' while there is no Electron main process. */
   kind: 'fake' | 'ipc'
   engine: {

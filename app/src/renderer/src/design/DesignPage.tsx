@@ -157,7 +157,7 @@ function Gallery() {
     <div className="flex min-h-full flex-col bg-bg">
       <header className="sticky top-0 z-20 flex h-12 items-center gap-3 border-b border-line bg-surface px-6">
         <h1 className="text-md text-fg">Design system</h1>
-        <span className="text-sm text-muted">Harbor primitives · tokens from replica/design/tokens.json</span>
+        <span className="text-sm text-muted">Tender primitives · tokens from replica/design/tokens.json</span>
         <div className="flex-1" />
         <Button variant="secondary" size="sm" icon={theme === 'dark' ? <Sun /> : <Moon />} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
           {theme === 'dark' ? 'Light' : 'Dark'} theme

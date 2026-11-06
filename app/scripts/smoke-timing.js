@@ -1,6 +1,6 @@
 // Read-only: how fast the lists answer, cold and warm.
 ;(async () => {
-  const h = window.harbor
+  const h = window.tender
   for (let i = 0; i < 40 && (await h.engine.status()).state !== 'running'; i++) await new Promise((x) => setTimeout(x, 250))
   const time = async (fn) => { const t = performance.now(); const v = await fn(); return [Math.round(performance.now() - t), v] }
   const events = []
