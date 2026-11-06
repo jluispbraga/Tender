@@ -12,7 +12,11 @@ import appIcon from '../../resources/icon.png?asset'
 const devUrl = process.env.ELECTRON_RENDERER_URL
 const startHidden = process.argv.includes('--hidden')
 
-if (!app.requestSingleInstanceLock()) app.quit()
+// Dev smoke runs (HARBOR_SMOKE) get their own profile and skip the
+// single-instance lock, so they work while a normal Harbor window is open.
+const smoke = !!process.env.HARBOR_SMOKE && !app.isPackaged
+if (smoke) app.setPath('userData', join(app.getPath('temp'), `harbor-smoke-${process.pid}`))
+else if (!app.requestSingleInstanceLock()) app.quit()
 
 let win: BrowserWindow | null = null
 let tray: Tray | null = null
