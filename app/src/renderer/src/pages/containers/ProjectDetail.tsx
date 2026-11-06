@@ -8,11 +8,11 @@ import { ErrorState } from '@/components/ui/error-state'
 import { LogViewer } from '@/components/ui/log-viewer'
 import { ActionsMenu } from '@/components/ui/menu'
 import { Select } from '@/components/ui/select'
-import { browsable, portLabel } from '@/lib/format'
 import { useContainers } from '@/lib/queries'
 import { href, navigate } from '@/lib/router'
 import { useContainerActions } from './actions'
 import { ContainerStatus } from './status'
+import { PortCell } from './ports'
 
 const MAX_LINES = 5000
 
@@ -115,7 +115,6 @@ export function ProjectDetail({ name }: { name: string }) {
 }
 
 function ServiceRow({ c, busy, menu }: { c: ContainerRow; busy: boolean; menu: ReturnType<ReturnType<typeof useContainerActions>['menu']> }) {
-  const ports = c.ports.filter((p) => p.publicPort)
   return (
     <tr className="h-9 border-b border-line hover:bg-hover">
       <td className="truncate px-5">
@@ -130,21 +129,7 @@ function ServiceRow({ c, busy, menu }: { c: ContainerRow; busy: boolean; menu: R
         <ContainerStatus c={c} />
       </td>
       <td className="truncate px-3">
-        {ports.length ? (
-          ports.map((p) =>
-            browsable(p) && c.state === 'running' ? (
-              <button key={portLabel(p)} type="button" onClick={() => void api.containers.openPort(p)} className="mr-2 rounded-sm text-link underline-offset-2 hover:underline">
-                {portLabel(p)}
-              </button>
-            ) : (
-              <span key={portLabel(p)} className="mr-2 text-muted">
-                {portLabel(p)}
-              </span>
-            ),
-          )
-        ) : (
-          <span className="text-muted">—</span>
-        )}
+        <PortCell c={c} />
       </td>
       <td className="px-3 text-right">{busy ? <span role="status" className="text-xs text-muted">Working…</span> : <ActionsMenu label={`Actions for ${c.name}`} entries={menu} />}</td>
     </tr>

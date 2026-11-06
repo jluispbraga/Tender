@@ -49,6 +49,36 @@ test.describe('F11 open an app in the browser', () => {
     expect(p.url()).toContain('localhost:8080')
   })
 
+  test('F11-E2 unpublished ports are shown, not hidden behind a dash', async ({ page, open }) => {
+    await open('#/containers')
+    const worker = row(page, 'Containers', 'shop/worker:dev')
+    await expect(worker).toContainText('8080')
+    await worker.getByRole('button', { name: 'Show all 2 ports of shop-worker-1' }).click()
+    const list = page.getByRole('dialog', { name: 'Ports of shop-worker-1' })
+    await expect(list).toContainText('9090/tcp')
+    await expect(list).toContainText('not published')
+    await expect(list.getByRole('link')).toHaveCount(0)
+  })
+
+  test('F11-E3 several published ports: all of them are reachable from the list', async ({ page, open, scan }) => {
+    await open('#/containers')
+    const name = 'telemetry-collector-for-the-platform-observability-stack-01'
+    await page.getByRole('button', { name: `Show all 3 ports of ${name}` }).click()
+    const list = page.getByRole('dialog', { name: `Ports of ${name}` })
+    // Live stats refresh the list every second; an open popover must survive that (BUG-009).
+    await page.waitForTimeout(2500)
+    await expect(list.getByRole('link', { name: /4318:4318/ })).toBeVisible()
+    await expect(list).toContainText('8125:8125/udp')
+    await scan('S03 ports popover')
+    await page.keyboard.press('Escape')
+    await expect(list).toHaveCount(0)
+  })
+
+  test('F11-E4 the detail page lists unpublished ports too', async ({ page, open }) => {
+    await open('#/containers/e0f1a2b3c4d5e6f7/logs')
+    await expect(page.getByText('8080/tcp, 9090/tcp (not published)')).toBeVisible()
+  })
+
   test('F11-E1 ports of a stopped or paused container are not links', async ({ page, open }) => {
     await open('#/containers')
     await expect(row(page, 'Containers', 'redis:7').getByRole('link')).toHaveCount(0)

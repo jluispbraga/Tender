@@ -53,7 +53,12 @@ export const seedContainers: ContainerRow[] = [
   {
     id: 'e0f1a2b3c4d5e6f7', name: 'shop-worker-1', image: 'shop/worker:dev', imageId: 'sha256:b0a7d4e5f6a1', command: 'node worker.js',
     state: 'restarting', exitCode: 1, createdAt: ago(130), startedAt: ago(0.2),
-    ports: [], mounts: [], env: ['QUEUE_URL=redis://cache:6379'], labels: label('shop', 'worker'), project: 'shop', service: 'worker',
+    // Exposed but not published, like a Compose service reachable only on the project network.
+    ports: [
+      { privatePort: 8080, protocol: 'tcp' },
+      { privatePort: 9090, protocol: 'tcp' },
+    ],
+    mounts: [], env: ['QUEUE_URL=redis://cache:6379'], labels: label('shop', 'worker'), project: 'shop', service: 'worker',
   },
   {
     id: 'd4e5f6a7b8c9d0e1', name: 'cache', image: 'redis:7', imageId: 'sha256:5e6f7a8b9c0d', command: 'redis-server --appendonly yes',

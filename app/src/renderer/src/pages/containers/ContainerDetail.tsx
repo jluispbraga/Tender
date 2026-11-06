@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ArrowLeft, Box, ExternalLink, Pause, Play, RotateCw, Square, Trash2 } from 'lucide-react'
+import { ArrowLeft, Box, Pause, Play, RotateCw, Square, Trash2 } from 'lucide-react'
 import { api, type ContainerRow, type LogLine } from '@/api'
 import { PageHeader } from '@/app/AppShell'
 import { Button } from '@/components/ui/button'
@@ -9,11 +9,12 @@ import { ErrorState } from '@/components/ui/error-state'
 import { LogViewer } from '@/components/ui/log-viewer'
 import { ActionsMenu } from '@/components/ui/menu'
 import { Tabs } from '@/components/ui/tabs'
-import { browsable, portLabel, shortId } from '@/lib/format'
+import { shortId } from '@/lib/format'
 import { useContainers, useSettings } from '@/lib/queries'
 import { href, navigate } from '@/lib/router'
 import { useContainerActions } from './actions'
 import { ContainerStatus } from './status'
+import { PortSummary } from './ports'
 import { InspectTab } from './tabs/InspectTab'
 import { MountsTab } from './tabs/MountsTab'
 import { ExecTab } from './tabs/ExecTab'
@@ -43,7 +44,6 @@ export function ContainerDetail({ id, tab }: { id: string; tab: string }) {
 
   const busy = actions.busy.has(c.id)
   const live = c.state === 'running' || c.state === 'restarting'
-  const ports = c.ports.filter((p) => p.publicPort)
   const headerLabels = ['Delete', 'Pause', 'Restart', 'Stop', 'Start', 'Resume']
 
   return (
@@ -106,25 +106,7 @@ export function ContainerDetail({ id, tab }: { id: string; tab: string }) {
           </Meta>
         )}
         <Meta label="Ports">
-          {ports.length ? (
-            <span className="inline-flex flex-wrap gap-2">
-              {ports.map((p) =>
-                browsable(p) && c.state === 'running' ? (
-                  <button key={portLabel(p)} type="button" onClick={() => void api.containers.openPort(p)} className="inline-flex items-center gap-1 rounded-sm text-link underline-offset-2 hover:underline">
-                    {portLabel(p)}
-                    <ExternalLink aria-hidden className="size-3" />
-                    <span className="sr-only">(opens in your browser)</span>
-                  </button>
-                ) : (
-                  <span key={portLabel(p)} className="text-muted">
-                    {portLabel(p)}
-                  </span>
-                ),
-              )}
-            </span>
-          ) : (
-            <span className="text-muted">none published</span>
-          )}
+          <PortSummary c={c} />
         </Meta>
       </dl>
 

@@ -98,15 +98,19 @@ export function createFakeApi(): TenderApi {
 
   // ---- background ticks: chatter, restart loop, stats ---------------------
   const stats = new Map<string, StatsSample>()
+  let tick = 0
   setInterval(() => {
     if (engine.state !== 'running') return
-    for (const c of containers) {
-      if (c.state !== 'running') continue
-      if (Math.random() < 0.45) {
+    tick++
+    containers.forEach((c, i) => {
+      if (c.state !== 'running') return
+      // Every running container writes a line every other tick (staggered), so
+      // a log view always sees new output within a few seconds; tests rely on it.
+      if ((tick + i) % 2 === 0) {
         const lines = chatter[flavour(c.image)] ?? chatter.default
-        pushLog(c.id, [{ ts: now(), ...lines[Math.floor(Math.random() * lines.length)] }])
+        pushLog(c.id, [{ ts: now(), ...lines[(tick + i) % lines.length] }])
       }
-    }
+    })
     // The worker never manages to start: restarting -> running -> restarting.
     const w = containers.find((c) => c.name === 'shop-worker-1' && (c.state === 'restarting' || c.state === 'running'))
     if (w && Math.random() < 0.3) {

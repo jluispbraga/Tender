@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef, RowSelectionState, VisibilityState } from '@tanstack/react-table'
-import { Box, Boxes, ExternalLink, Layers, Pause, Play, RotateCw, Square, Trash2 } from 'lucide-react'
-import { api, type ContainerRow } from '@/api'
+import { Box, Boxes, Layers, Pause, Play, RotateCw, Square, Trash2 } from 'lucide-react'
+import { api, type ContainerRow, type StatsSample } from '@/api'
 import { PageHeader } from '@/app/AppShell'
 import { Button } from '@/components/ui/button'
 import { CopyButton } from '@/components/ui/copy-button'
@@ -12,11 +12,12 @@ import { ErrorState } from '@/components/ui/error-state'
 import { SearchField } from '@/components/ui/input'
 import { ActionsMenu } from '@/components/ui/menu'
 import { Switch } from '@/components/ui/switch'
-import { ago, browsable, bytes, fullDate, portLabel } from '@/lib/format'
+import { ago, bytes, fullDate } from '@/lib/format'
 import { keys, setSetting, useContainers, useSettings, useStats } from '@/lib/queries'
 import { navigate, routeQuery } from '@/lib/router'
 import { useWidth } from '@/lib/use-width'
 import { useContainerActions } from './actions'
+import { PortCell } from './ports'
 import { ContainerStatus } from './status'
 
 const optionalColumns = [
@@ -27,6 +28,17 @@ const optionalColumns = [
   { id: 'started', label: 'Last started' },
   { id: 'created', label: 'Created' },
 ]
+
+// Live stats reach the CPU and memory cells through context, so the column
+// definitions stay stable. If the columns depended on stats, every sample
+// (once a second) would remount every cell: open popovers closed, focus lost.
+const LiveStats = createContext<Record<string, StatsSample[]>>({})
+
+function LiveStat({ id, kind }: { id: string; kind: 'cpu' | 'memory' }) {
+  const last = useContext(LiveStats)[id]?.at(-1)
+  if (!last) return <span className="text-muted tabular-nums">—</span>
+  return <span className="text-muted tabular-nums">{kind === 'cpu' ? `${last.cpuPercent.toFixed(1)}%` : bytes(last.memUsage)}</span>
+}
 
 /** S03: every container, grouped by Compose project. */
 export function ContainersPage() {
@@ -52,6 +64,9 @@ export function ContainersPage() {
   const running = useMemo(() => (containers.data ?? []).filter((c) => c.state === 'running').map((c) => c.id), [containers.data])
   const liveCols = visibility.cpu !== false || visibility.memory !== false
   const stats = useStats(liveCols ? running : [], 1)
+  // Sorting reads the latest sample without making the columns depend on it.
+  const statsRef = useRef(stats)
+  statsRef.current = stats
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase()
@@ -105,54 +120,28 @@ export function ContainersPage() {
       {
         id: 'ports',
         header: 'Ports',
-        size: 130,
+        size: 150,
         enableSorting: false,
-        cell: ({ row }) => {
-          const ports = row.original.ports.filter((p) => p.publicPort)
-          if (!ports.length) return <span className="text-muted">—</span>
-          const first = ports[0]
-          return (
-            <span className="inline-flex items-center gap-1.5">
-              {browsable(first) && row.original.state === 'running' ? (
-                <a
-                  href={`http://localhost:${first.publicPort}`}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    void api.containers.openPort(first)
-                  }}
-                  className="inline-flex items-center gap-1 text-link underline-offset-2 hover:underline"
-                  aria-label={`${portLabel(first)}, opens ${row.original.name} in your browser`}
-                >
-                  {portLabel(first)}
-                  <ExternalLink aria-hidden className="size-3" />
-                </a>
-              ) : (
-                <span className="text-muted">{portLabel(first)}</span>
-              )}
-              {ports.length > 1 && <span className="text-xs text-muted" title={ports.slice(1).map(portLabel).join(', ')}>+{ports.length - 1}</span>}
-            </span>
-          )
-        },
+        cell: ({ row }) => <PortCell c={row.original} />,
       },
       {
         id: 'cpu',
         header: 'CPU',
         size: 72,
-        accessorFn: (c) => stats[c.id]?.at(-1)?.cpuPercent ?? -1,
-        cell: ({ getValue }) => <span className="text-muted tabular-nums">{getValue() >= 0 ? `${getValue().toFixed(1)}%` : '—'}</span>,
+        accessorFn: (c) => statsRef.current[c.id]?.at(-1)?.cpuPercent ?? -1,
+        cell: ({ row }) => <LiveStat id={row.original.id} kind="cpu" />,
       },
       {
         id: 'memory',
         header: 'Memory',
         size: 88,
-        accessorFn: (c) => stats[c.id]?.at(-1)?.memUsage ?? -1,
-        cell: ({ getValue }) => <span className="text-muted tabular-nums">{getValue() >= 0 ? bytes(getValue()) : '—'}</span>,
+        accessorFn: (c) => statsRef.current[c.id]?.at(-1)?.memUsage ?? -1,
+        cell: ({ row }) => <LiveStat id={row.original.id} kind="memory" />,
       },
       { id: 'started', accessorKey: 'startedAt', header: 'Last started', size: 110, cell: ({ getValue }) => <span className="text-muted" title={fullDate(getValue())}>{ago(getValue())}</span> },
       { id: 'created', accessorKey: 'createdAt', header: 'Created', size: 110, cell: ({ getValue }) => <span className="text-muted" title={fullDate(getValue())}>{ago(getValue())}</span> },
     ],
-    [stats],
+    [],
   )
 
   const selected = (containers.data ?? []).filter((c) => sel[c.id])
@@ -186,6 +175,7 @@ export function ContainersPage() {
         {containers.isError ? (
           <ErrorState what="containers" error={containers.error} onRetry={() => void containers.refetch()} />
         ) : (
+          <LiveStats.Provider value={stats}>
           <DataGrid
             label="Containers"
             loading={containers.isPending}
@@ -255,6 +245,7 @@ export function ContainersPage() {
               )
             }
           />
+          </LiveStats.Provider>
         )}
       </div>
       <p className="sr-only" aria-live="polite">
