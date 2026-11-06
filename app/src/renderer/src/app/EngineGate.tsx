@@ -54,8 +54,8 @@ export function EngineGate({ children }: { children: ReactNode }) {
           {starting
             ? 'This usually takes a few seconds after the engine starts.'
             : s?.state === 'stopped'
-              ? 'Start your Docker engine wherever you run it (WSL 2, a VM, another machine), then retry. Tender never starts or changes it for you.'
-              : `Tried ${s?.endpoint ?? 'the default pipe'}. Make sure an engine is running and that this Windows user may use it.`}
+              ? `Start your Docker engine wherever you run it (${api.platform === 'win32' ? 'WSL 2, a VM' : api.platform === 'linux' ? 'systemd, rootless' : 'a VM'}, another machine), then retry. Tender never starts or changes it for you.`
+              : `Tried ${s?.endpoint ?? 'the default endpoint'}. Make sure an engine is running and that your user may use it.`}
         </p>
         {s?.error && !starting && <p className="rounded-md bg-danger-bg px-3 py-2 font-mono text-sm text-danger">{s.error}</p>}
         <div className="flex gap-2">

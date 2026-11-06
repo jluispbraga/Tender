@@ -53,7 +53,9 @@ export class Store {
   }
 
   /** First run: one default endpoint, default grid columns. Settings fall back to defaults in code. */
-  seed(endpoint: { name: string; kind: 'npipe' | 'tcp' | 'ssh'; address: string }) {
+  seed(endpoint: { name: string; kind: 'npipe' | 'unix' | 'tcp' | 'ssh'; address: string }) {
+    // The kind column predates Unix sockets; a socket and a named pipe are both local endpoints.
+    endpoint = { ...endpoint, kind: endpoint.kind === 'unix' ? 'npipe' : endpoint.kind }
     const existing = this.db.prepare('select id, address from engine_endpoints where is_default = 1').get() as { id: string; address: string } | undefined
     if (!existing) {
       this.db.prepare('insert into engine_endpoints (id, name, kind, address, is_default) values (?, ?, ?, ?, 1)').run(randomUUID(), endpoint.name, endpoint.kind, endpoint.address)

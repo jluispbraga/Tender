@@ -19,7 +19,12 @@ test.beforeAll(async () => {
     ...(process.env.TENDER_EXE
       ? { executablePath: process.env.TENDER_EXE, args: [`--user-data-dir=${mkdtempSync(join(tmpdir(), 'tender-profile-'))}`] }
       : { args: ['out/main/index.js'] }),
-    env: { ...process.env, TENDER_DB_PATH: join(mkdtempSync(join(tmpdir(), 'tender-e2e-')), 'tender.db') },
+    env: {
+      ...process.env,
+      TENDER_DB_PATH: join(mkdtempSync(join(tmpdir(), 'tender-e2e-')), 'tender.db'),
+      // TENDER_WSL=1 (dev build, Windows): hide the default pipe so Tender has to find the engine inside WSL.
+      ...(process.env.TENDER_WSL ? { TENDER_DEFAULT_PIPE: 'tender-e2e-missing', DOCKER_CONTEXT: 'default', DOCKER_HOST: '' } : {}),
+    },
   })
   page = await app.firstWindow()
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
@@ -67,4 +72,11 @@ test('E-2 the page has no Node access and the IPC layer rejects bad input', asyn
     return out
   })
   expect(r).toMatchObject({ require: 'undefined', process: 'undefined', kind: 'ipc', bad: { status: 400 }, badPort: 400 })
+})
+
+test('E-WSL with no default pipe, the engine inside a running WSL distribution is used', async () => {
+  test.skip(!process.env.TENDER_WSL, 'set TENDER_WSL=1 with a running distribution that has Docker')
+  const s = await page.evaluate(() => (window as any).tender.engine.status())
+  expect(s.state).toBe('running')
+  expect(s.endpoint).toMatch(/^wsl:\/\//)
 })

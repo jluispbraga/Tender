@@ -1,3 +1,4 @@
+import { app } from 'electron'
 import { PassThrough, type Readable } from 'node:stream'
 import Docker from 'dockerode'
 import {
@@ -20,7 +21,8 @@ import {
   type VolumeRow,
   type VolumeUsage,
 } from '../../renderer/src/api/types'
-import { dockerOptions, resolveEndpoint, type Endpoint } from './endpoint'
+import { dockerOptions, resolveEndpoint, WINDOWS_PIPE, type Endpoint } from './endpoint'
+import { findWslEngine, pipeExists, WslBridge } from './wsl'
 
 type Listener<T> = (v: T) => void
 
@@ -68,6 +70,11 @@ export class Engine {
   /** Containers Tender itself is stopping: their exit is expected, not a notification. */
   private stopping = new Set<string>()
   private hostArch = 'amd64'
+  /** Windows: the relay to a Docker Engine inside WSL, when that is what answered. */
+  private bridge: WslBridge | null = null
+  /** Why the WSL fallback found nothing, added to the unreachable message. */
+  private wslMiss: string | null = null
+  private discovering: Promise<void> | null = null
 
   get currentEndpoint() {
     return this.endpoint
@@ -102,6 +109,33 @@ export class Engine {
   stop() {
     clearTimeout(this.pingTimer)
     this.eventStream?.destroy()
+    this.closeBridge()
+  }
+
+  private closeBridge() {
+    this.bridge?.close()
+    this.bridge = null
+  }
+
+  /**
+   * Windows only: when Tender would fall back to the default pipe and nothing
+   * listens there, look for a Docker Engine inside a running WSL distribution
+   * and bridge to it. DOCKER_HOST and contexts always win over this.
+   */
+  private async discoverWsl() {
+    if (process.platform !== 'win32' || this.endpoint.name !== 'default' || this.endpoint.address !== WINDOWS_PIPE) return
+    // Dev only: pretend the default pipe is missing, to exercise this path next to Docker Desktop.
+    const pipe = !app.isPackaged && process.env.TENDER_DEFAULT_PIPE ? process.env.TENDER_DEFAULT_PIPE : 'docker_engine'
+    if (pipeExists(pipe)) return
+    if (pipe !== 'docker_engine') this.endpoint = { ...this.endpoint, address: `npipe:////./pipe/${pipe}` }
+    const r = await findWslEngine()
+    if (!r.found) {
+      this.wslMiss = r.why
+      return
+    }
+    this.wslMiss = null
+    this.bridge = await WslBridge.open(r.found.distro)
+    this.endpoint = { name: `wsl:${r.found.distro}`, kind: 'npipe', address: `wsl://${r.found.distro}`, source: `Docker in WSL (${r.found.distro})`, socketPath: this.bridge.pipe }
   }
 
   async reconnect(): Promise<EngineStatus> {
@@ -109,6 +143,7 @@ export class Engine {
     this.eventStream?.destroy()
     this.eventStream = null
     this.docker = null
+    this.closeBridge()
     this.endpoint = resolveEndpoint()
     this.setStatus({ state: 'starting', endpoint: this.endpoint.address })
     await this.connect()
@@ -124,6 +159,11 @@ export class Engine {
   private async connect() {
     clearTimeout(this.pingTimer)
     try {
+      if (!this.docker && !this.bridge) {
+        // One discovery at a time: failed calls also trigger connect().
+        this.discovering ??= this.discoverWsl().finally(() => (this.discovering = null))
+        await this.discovering
+      }
       const docker = this.docker ?? new Docker(dockerOptions(this.endpoint))
       await docker.ping()
       const [version, info] = await Promise.all([docker.version(), docker.info()])
@@ -147,7 +187,13 @@ export class Engine {
       this.eventStream?.destroy()
       this.eventStream = null
       this.failures++
-      this.setStatus({ state: 'error', endpoint: this.endpoint.address, error: `${toApiError(e).message} (from ${this.endpoint.source})` })
+      const wsl = this.wslMiss ? `; also looked in WSL: ${this.wslMiss}` : ''
+      this.setStatus({ state: 'error', endpoint: this.endpoint.address, error: `${toApiError(e).message} (from ${this.endpoint.source}${wsl})` })
+      // The distribution went away: drop the bridge so the next try looks again from the start.
+      if (this.bridge) {
+        this.closeBridge()
+        this.endpoint = resolveEndpoint()
+      }
       // 2 s, 4 s, 8 s, then every 10 s while unreachable.
       this.schedulePing(Math.min(10_000, 1000 * 2 ** this.failures))
     }

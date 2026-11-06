@@ -51,6 +51,7 @@ const quiet = (s: { ready: Promise<void>; stop: () => void }) => {
 
 const tender: TenderApi = {
   kind: 'ipc',
+  platform: process.platform,
   engine: {
     status: () => call('engine.status'),
     reconnect: () => call('engine.reconnect'),

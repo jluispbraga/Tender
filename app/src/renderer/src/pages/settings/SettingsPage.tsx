@@ -7,7 +7,7 @@ import { useToast } from '@/components/ui/toast'
 import { setSetting, useEngine, useSettings } from '@/lib/queries'
 import { href } from '@/lib/router'
 import { cn } from '@/lib/cn'
-import type { Settings } from '@/api'
+import { api, type Settings } from '@/api'
 
 const sections = [
   { key: 'general', label: 'General' },
@@ -60,14 +60,14 @@ function GeneralSection() {
   return (
     <div className="flex max-w-xl flex-col gap-8">
       <Group title="Appearance">
-        <Field label="Theme" description="System follows Windows’ light or dark mode.">
+        <Field label="Theme" description="System follows your computer’s light or dark mode.">
           <Select
             label="Theme"
             value={s.theme}
             onValueChange={(v) => void save('theme', v as Settings['theme'])}
             className="w-44 shrink-0"
             options={[
-              { value: 'system', label: 'Same as Windows' },
+              { value: 'system', label: 'Same as system' },
               { value: 'light', label: 'Light' },
               { value: 'dark', label: 'Dark' },
             ]}
@@ -75,9 +75,9 @@ function GeneralSection() {
         </Field>
       </Group>
       <Group title="Startup">
-        <Switch label="Start Tender when I sign in to Windows" checked={s.start_on_login} onCheckedChange={(v) => void save('start_on_login', v)} />
+        <Switch label="Start Tender when I sign in" checked={s.start_on_login} onCheckedChange={(v) => void save('start_on_login', v)} />
         <Switch label="Open the window when Tender starts" checked={s.open_on_start} onCheckedChange={(v) => void save('open_on_start', v)} />
-        <Switch label="Keep running in the notification area when the window is closed" checked={s.tray_enabled} onCheckedChange={(v) => void save('tray_enabled', v)} />
+        <Switch label={`Keep running in the ${api.platform === 'darwin' ? 'menu bar' : api.platform === 'win32' ? 'notification area' : 'system tray'} when the window is closed`} checked={s.tray_enabled} onCheckedChange={(v) => void save('tray_enabled', v)} />
       </Group>
       <Group title="Containers">
         <Field label="Default shell" description="Used when you open a terminal in a container. You can switch per session.">

@@ -33,6 +33,7 @@ export function TroubleshootPage() {
     `Engine endpoint: ${e?.endpoint ?? 'unknown'}`,
     `Engine state: ${e?.state ?? 'unknown'}${e?.error ? ` (${e.error})` : ''}`,
     `Engine version: ${e?.version ?? 'unknown'} / API ${e?.apiVersion ?? 'unknown'}`,
+    `Platform: ${api.platform}`,
     `OS: ${navigator.userAgent}`,
   ].join('\n')
 
@@ -64,7 +65,18 @@ export function TroubleshootPage() {
           </Card>
           <Card title="If the engine won’t start">
             <ul className="list-disc space-y-1 pl-5 text-sm text-muted">
-              <li>Check that WSL 2 is installed and its distribution is running: <code className="font-mono text-xs text-fg">wsl --status</code></li>
+              {api.platform === 'win32' && (
+                <>
+                  <li>Check that WSL 2 is installed and the distribution with Docker is running: <code className="font-mono text-xs text-fg">wsl --list --running</code></li>
+                  <li>Docker installed straight into WSL needs no setup: Tender finds it in any running distribution, through that distribution’s own <code className="font-mono text-xs text-fg">docker</code> command.</li>
+                </>
+              )}
+              {api.platform === 'linux' && (
+                <>
+                  <li>Check that the service is running: <code className="font-mono text-xs text-fg">systemctl status docker</code> (rootless: <code className="font-mono text-xs text-fg">systemctl --user status docker</code>)</li>
+                  <li>Check that your user may use it, without sudo: <code className="font-mono text-xs text-fg">groups</code> should list <code className="font-mono text-xs text-fg">docker</code></li>
+                </>
+              )}
               <li>Check that the engine answers from a terminal: <code className="font-mono text-xs text-fg">docker version</code></li>
               <li>If you use Docker contexts, see which one is active: <code className="font-mono text-xs text-fg">docker context ls</code></li>
             </ul>

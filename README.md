@@ -4,7 +4,20 @@ Tender is a desktop application for managing Docker environments through a focus
 
 Instead of replacing the Docker Engine or Docker CLI, Tender connects to an existing Docker Engine and provides a visual way to inspect and operate it.
 
-> **Project status:** This repository contains the application source code. Check the repository's Releases section for packaged installers; a release/build distribution process is not defined in the supplied project configuration.
+Tender runs on **Windows** and **Linux** (macOS builds from source).
+
+## Install
+
+Download the latest build from [Releases](https://github.com/jluispbraga/Tender/releases):
+
+| Platform | File |
+|---|---|
+| Windows | `Tender-Setup-<version>.exe` (installer) or `Tender-<version>-portable.exe` |
+| Linux | `Tender-<version>-x86_64.AppImage` (any distribution) or `tender_<version>_amd64.deb` (Debian, Ubuntu) |
+
+The builds are not code-signed yet, so Windows SmartScreen may warn on first run. Each release lists SHA-256 checksums in `SHA256SUMS.txt`.
+
+On Linux, make the AppImage executable first: `chmod +x Tender-*.AppImage`.
 
 ## Features
 
@@ -66,10 +79,15 @@ Docker objects remain managed by the Docker Engine. Tender's SQLite database sto
 
 - Node.js compatible with the versions required by Electron 44 and the project dependencies.
 - npm.
-- A running Docker Engine and permission to access its socket or endpoint when using the real desktop application.
-- Windows is the default connection target in the current configuration (`npipe:////./pipe/docker_engine`). The endpoint resolver also supports Docker TCP, SSH, and Unix socket endpoints.
+- A running Docker Engine and permission to use it. Tender never installs, starts or reconfigures the engine.
 
-On Windows, any Docker Engine that exposes a compatible endpoint can be used, for example Docker Engine running in WSL 2. Make sure the current Windows user has permission to access the engine.
+| Where the engine runs | What to do |
+|---|---|
+| Linux (system service) | Nothing, as long as your user is in the `docker` group. |
+| Linux (rootless Docker) | Nothing: Tender finds `$XDG_RUNTIME_DIR/docker.sock`. |
+| Windows, Docker Engine installed inside WSL 2 | Nothing: keep the distribution running and Tender bridges to it (see below). |
+| Windows, Docker Desktop or dockerd as a service | Nothing: Tender uses the default named pipe. |
+| Another machine | Set `DOCKER_HOST` (for example `ssh://user@host`) or a Docker context. |
 
 ## Getting started
 
@@ -77,7 +95,7 @@ Clone the repository and install its dependencies:
 
 ```bash
 git clone https://github.com/jluispbraga/Tender.git
-cd Tender
+cd Tender/app
 npm install
 ```
 
@@ -105,6 +123,14 @@ npm run build
 
 The build command runs TypeScript checks and then builds the Electron application.
 
+To package it for the current platform (output in `app/release`):
+
+```bash
+npm run dist
+```
+
+`npm run dist:win` builds the Windows installer and portable exe; `npm run dist:linux` builds the AppImage and `.deb` and must run on Linux. Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds both on GitHub Actions and attaches them to a draft release.
+
 To preview the built Electron application:
 
 ```bash
@@ -117,9 +143,25 @@ Tender resolves the Docker endpoint using the following order:
 
 1. `DOCKER_HOST`, when set.
 2. `DOCKER_CONTEXT`, or the current Docker context configured in `~/.docker/config.json`.
-3. The default Windows named pipe: `npipe:////./pipe/docker_engine`.
+3. The platform's default local endpoint:
+   - **Linux:** `/var/run/docker.sock`, then rootless `$XDG_RUNTIME_DIR/docker.sock`, then Docker Desktop for Linux.
+   - **macOS:** Docker Desktop, `/var/run/docker.sock`, Colima, OrbStack, Rancher Desktop.
+   - **Windows:** the named pipe `npipe:////./pipe/docker_engine`.
+4. **Windows only:** if that pipe does not exist, a Docker Engine inside a running WSL distribution.
 
 The resolver reads Docker's existing context configuration; it does not modify it.
+
+### Docker Engine inside WSL (Windows)
+
+If you installed Docker Engine straight into a WSL distribution (no Docker Desktop), Windows programs cannot open its Unix socket. Tender bridges it for you:
+
+- It looks only at distributions that are **already running** (`wsl --list --running`), so it never boots one.
+- It uses the first one where `docker version` answers.
+- Every connection goes through `docker system dial-stdio` inside that distribution, the same relay the Docker CLI uses over SSH, behind a private named pipe on the Windows side.
+
+There is no TCP port, no root and no change to the distribution. You do not need to set `DOCKER_HOST`; if you set one, it still wins.
+
+If your user is not in the distribution's `docker` group, the connection error says so. Fix it with `sudo usermod -aG docker $USER` inside WSL, then `wsl --terminate <distro>` and start the distribution again.
 
 ### Environment variables
 
@@ -131,7 +173,7 @@ Copy `.env.example` as a starting point when configuring local development. All 
 | `DOCKER_CONTEXT` | Docker context name to use when `DOCKER_HOST` is not set. |
 | `DOCKER_TLS_VERIFY` | Set to `1` to enable TLS verification for TCP connections. |
 | `DOCKER_CERT_PATH` | Directory containing `ca.pem`, `cert.pem`, and `key.pem` for TLS. |
-| `TENDER_DB_PATH` | Custom path for Tender's SQLite database. Defaults to `%APPDATA%\\tender\\tender.db` on Windows. |
+| `TENDER_DB_PATH` | Custom path for Tender's SQLite database. Defaults to `%APPDATA%\\tender\\tender.db` on Windows and `~/.config/tender/tender.db` on Linux. |
 | `TENDER_SMOKE` | Development-only script executed against `window.tender` before the app exits. |
 | `TENDER_SHOTS` | Development-only output directory for route screenshots generated by smoke runs. |
 | `TENDER_SHOT_ROUTES` | Comma-separated route hashes to capture during a smoke run. |
@@ -143,7 +185,7 @@ $env:DOCKER_HOST = "tcp://127.0.0.1:2375"
 npm run dev
 ```
 
-Only expose an unauthenticated Docker TCP endpoint on a trusted local environment. Access to a Docker Engine can provide powerful control over the host.
+Only expose an unauthenticated Docker TCP endpoint on a trusted local environment. Access to a Docker Engine can provide powerful control over the host. For an engine inside WSL you do not need TCP at all (see above).
 
 ## Testing
 

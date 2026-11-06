@@ -235,6 +235,7 @@ export function createFakeApi(): TenderApi {
 
   const api: TenderApi = {
     kind: 'fake',
+    platform: /Windows/.test(navigator.userAgent) ? 'win32' : /Mac OS/.test(navigator.userAgent) ? 'darwin' : 'linux',
     engine: {
       async status() {
         await sleep(80)

@@ -197,6 +197,8 @@ type Unsub = () => void
 export interface TenderApi {
   /** 'fake' while there is no Electron main process. */
   kind: 'fake' | 'ipc'
+  /** The host OS Tender runs on (not the engine's): picks wording and hints. */
+  platform: 'win32' | 'linux' | 'darwin' | (string & {})
   engine: {
     status(): Promise<EngineStatus>
     reconnect(): Promise<EngineStatus>

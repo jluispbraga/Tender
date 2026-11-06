@@ -1,4 +1,5 @@
-import { join } from 'node:path'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { app, BrowserWindow, Menu, nativeImage, nativeTheme, session, Tray, type IpcMainInvokeEvent } from 'electron'
 import { Store } from './db'
 import { Engine } from './engine/engine'
@@ -118,7 +119,19 @@ function setupTray(enabled: boolean) {
 function applyLoginItem(on: boolean) {
   // Only the packaged app registers itself; a dev build would register electron.exe.
   if (!app.isPackaged) return
-  app.setLoginItemSettings({ openAtLogin: on, args: ['--hidden'] })
+  if (process.platform !== 'linux') return app.setLoginItemSettings({ openAtLogin: on, args: ['--hidden'] })
+  // Linux has no login-item API: an XDG autostart entry does the same job.
+  // An AppImage moves with its file, so start that file rather than the temporary mount.
+  const file = join(app.getPath('appData'), 'autostart', 'tender.desktop')
+  if (!on) return rmSync(file, { force: true })
+  const exe = process.env.APPIMAGE ?? process.execPath
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, `[Desktop Entry]
+Type=Application
+Name=Tender
+Exec="${exe}" --hidden
+X-GNOME-Autostart-enabled=true
+`)
 }
 
 function onSettingChanged(key: string, value: unknown) {
