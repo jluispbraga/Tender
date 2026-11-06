@@ -27,6 +27,17 @@ test.describe('cross-cutting', () => {
     }
   })
 
+  test('X7 a list longer than the window scrolls inside, never the whole page', async ({ page, open }) => {
+    // Short window so the seed data overflows the list, like a real engine with dozens of containers.
+    await page.setViewportSize({ width: 1280, height: 360 })
+    for (const hash of ['#/containers', '#/images', '#/volumes']) {
+      await open(hash)
+      await page.waitForTimeout(300)
+      const [doc, view] = await page.evaluate(() => [document.scrollingElement!.scrollHeight, window.innerHeight])
+      expect(doc, `page taller than the window on ${hash}`).toBeLessThanOrEqual(view)
+    }
+  })
+
   test('X4 quick search jumps to an image and remembers it', async ({ page, open, scan }) => {
     await open('#/containers')
     await page.keyboard.press('Control+k')

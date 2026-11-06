@@ -134,7 +134,10 @@ export function DataGrid<T>(p: DataGridProps<T>) {
   if (!flat.length) return <>{p.empty}</>
 
   return (
-    <table aria-label={p.label} className="w-full table-fixed border-collapse">
+    // `relative`: absolutely positioned bits inside rows (sr-only live regions,
+    // Radix's hidden inputs) must be laid out against the table, not the page.
+    // Otherwise every row below the fold makes the whole window scroll too.
+    <table aria-label={p.label} className="relative w-full table-fixed border-collapse">
       <thead className="sticky top-0 z-10 bg-surface">
         <tr className="h-8 border-b border-line text-left">
           <th className="w-10 pl-4">
