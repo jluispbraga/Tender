@@ -1,7 +1,7 @@
 {
   "name": "tender",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "tokens": "python ../replica/design/build_tokens.py ../replica/design/tokens.json src/renderer/src/styles",
@@ -10,7 +10,8 @@
     "start": "electron-vite preview",
     "dev:design": "vite --port 5174",
     "build:renderer": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
+    "dist": "npm run build && electron-builder --win nsis portable --publish never"
   },
   "dependencies": {
     "@fontsource-variable/inter": "5.2.6",
@@ -47,10 +48,49 @@
     "@types/react-dom": "18.3.7",
     "@vitejs/plugin-react": "4.5.2",
     "electron": "44.10.2",
+    "electron-builder": "26.18.0",
     "electron-vite": "6.0.0",
     "tailwindcss": "4.1.10",
     "typescript": "5.8.3",
     "vite": "6.4.5"
   },
-  "main": "out/main/index.js"
+  "main": "out/main/index.js",
+  "description": "A small desktop GUI for the Docker Engine you already run.",
+  "author": "jluispbraga",
+  "homepage": "https://github.com/jluispbraga/Harbor",
+  "build": {
+    "appId": "io.github.jluispbraga.tender",
+    "productName": "Tender",
+    "copyright": "Copyright © 2026 jluispbraga",
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
+    "files": [
+      "out/**",
+      "resources/**",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "resources/**"
+    ],
+    "win": {
+      "icon": "resources/icon.png",
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "artifactName": "${productName}-${version}-${arch}-${target}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.${ext}"
+    }
+  }
 }

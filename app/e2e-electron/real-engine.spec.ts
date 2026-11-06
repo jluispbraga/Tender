@@ -13,8 +13,12 @@ let page: Page
 const errors: string[] = []
 
 test.beforeAll(async () => {
+  // TENDER_EXE=release/win-unpacked/Tender.exe tests the packaged build instead of out/.
   app = await electron.launch({
-    args: ['out/main/index.js'],
+    // Its own profile, so it runs beside a Tender that's already open (single-instance lock).
+    ...(process.env.TENDER_EXE
+      ? { executablePath: process.env.TENDER_EXE, args: [`--user-data-dir=${mkdtempSync(join(tmpdir(), 'tender-profile-'))}`] }
+      : { args: ['out/main/index.js'] }),
     env: { ...process.env, TENDER_DB_PATH: join(mkdtempSync(join(tmpdir(), 'tender-e2e-')), 'tender.db') },
   })
   page = await app.firstWindow()
