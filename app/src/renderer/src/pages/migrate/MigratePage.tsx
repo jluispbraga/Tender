@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, ArrowRight, Check, CircleSlash, Loader2, RotateCw, SquareTerminal, X } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Check, CircleSlash, Loader2, RotateCw, Wrench, X } from 'lucide-react'
 import { api, type MigrationCheck, type MigrationEvent, type MigrationItem, type MigrationStep } from '@/api'
 import { PageHeader } from '@/app/AppShell'
 import { Button } from '@/components/ui/button'
@@ -39,7 +39,6 @@ export function MigratePage() {
 // ---- 1. both engines ----------------------------------------------------------------------
 
 function Checks({ check, loading, onRecheck }: { check?: MigrationCheck; loading: boolean; onRecheck: () => void }) {
-  const [opened, setOpened] = useState(false)
   return (
     <section aria-labelledby="checks-title" className="flex flex-col gap-3 rounded-lg border border-line p-4">
       <div className="flex items-center justify-between gap-3">
@@ -62,30 +61,8 @@ function Checks({ check, loading, onRecheck }: { check?: MigrationCheck; loading
             title="Docker Engine inside WSL (where they go)"
             detail={check.target.ok ? `${check.target.distro}, Docker ${check.target.version}` : check.target.reason}
           >
-            {check.target.hijacked && (
-              <div className="flex flex-col gap-2 text-sm text-muted">
-                <p>Both engines have to answer at the same time. To get there:</p>
-                <ol className="list-decimal space-y-1 pl-5">
-                  <li>
-                    In Docker Desktop, open Settings › Resources › WSL integration, turn off <strong className="text-fg">{check.target.hijacked}</strong>, and click Apply.
-                  </li>
-                  <li>Give the socket back to the distribution’s own engine. This opens a terminal that asks for your Linux password.</li>
-                </ol>
-                <div>
-                  <Button
-                    icon={<SquareTerminal />}
-                    onClick={async () => {
-                      await api.migrate.fixSocket(check.target.hijacked!)
-                      setOpened(true)
-                    }}
-                  >
-                    Open the terminal
-                  </Button>
-                </div>
-                {opened && <p role="status">When the terminal closes, click Check again.</p>}
-              </div>
-            )}
-            {!check.target.ok && !check.target.hijacked && (
+            {(check.target.hijacked || check.target.lost) && <RepairSteps distro={(check.target.hijacked ?? check.target.lost)!} hijacked={!!check.target.hijacked} onDone={onRecheck} />}
+            {!check.target.ok && !check.target.hijacked && !check.target.lost && (
               <p className="text-sm text-muted">
                 Install Docker Engine in your WSL distribution (Docker’s guide “Install Docker Engine on Ubuntu”), add your user to the <code className="font-mono text-xs text-fg">docker</code> group, and keep the distribution running.
               </p>
@@ -94,6 +71,43 @@ function Checks({ check, loading, onRecheck }: { check?: MigrationCheck; loading
         </ul>
       )}
     </section>
+  )
+}
+
+/** The distribution's engine runs, but Docker Desktop holds or removed its socket. */
+function RepairSteps({ distro, hijacked, onDone }: { distro: string; hijacked: boolean; onDone: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  return (
+    <div className="flex flex-col gap-2 text-sm text-muted">
+      <ol className="list-decimal space-y-1 pl-5">
+        <li>
+          In Docker Desktop, open Settings › Resources › WSL integration, turn off <strong className="text-fg">Enable integration with my default WSL distro</strong> and <strong className="text-fg">{distro}</strong>, then click Apply. {hijacked ? 'Until then, Docker Desktop answers in its place.' : 'Otherwise Docker Desktop takes the socket again next time it starts.'}
+        </li>
+        <li>Repair: Tender restarts Docker in {distro} so it gets its socket back. Containers running there stop; those with a restart policy come back.</li>
+      </ol>
+      <div>
+        <Button
+          icon={<Wrench />}
+          loading={busy}
+          onClick={async () => {
+            setBusy(true)
+            setError(null)
+            try {
+              await api.migrate.repairSocket(distro)
+              onDone()
+            } catch (e) {
+              setError((e as Error).message)
+            } finally {
+              setBusy(false)
+            }
+          }}
+        >
+          Repair Docker in {distro}
+        </Button>
+      </div>
+      {error && <p className="rounded-md bg-danger-bg px-3 py-2 text-danger">{error}</p>}
+    </div>
   )
 }
 

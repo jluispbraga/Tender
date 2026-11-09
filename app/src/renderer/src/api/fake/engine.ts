@@ -285,13 +285,21 @@ export function createFakeApi(): TenderApi {
         }, 60)
         return () => clearInterval(timer)
       },
-      async fixSocket() {},
+      async repairSocket() {
+        await sleep(300)
+      },
     },
     platform: /Windows/.test(navigator.userAgent) ? 'win32' : /Mac OS/.test(navigator.userAgent) ? 'darwin' : 'linux',
     engine: {
       async status() {
         await sleep(80)
         return { ...engine, containersRunning: containers.filter((c) => c.state === 'running').length }
+      },
+      async repairWsl() {
+        setEngine({ state: 'starting', error: undefined, repair: undefined })
+        await sleep(800)
+        setEngine({ state: 'running' })
+        return engine
       },
       async reconnect() {
         setEngine({ state: 'starting', error: undefined })
@@ -620,7 +628,7 @@ export function createFakeApi(): TenderApi {
 
   // Test hooks for engine states (S01). Only exist in the fake.
   ;(window as unknown as { __tenderFake: unknown }).__tenderFake = {
-    setEngine: (state: EngineStatus['state'], error?: string) => setEngine({ state, error }),
+    setEngine: (state: EngineStatus['state'], error?: string, repair?: string) => setEngine({ state, error, repair }),
   }
 
   return api

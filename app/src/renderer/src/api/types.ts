@@ -15,6 +15,8 @@ export interface EngineStatus {
   memTotal?: number
   containersRunning?: number
   error?: string
+  /** Windows: this WSL distribution's engine runs but lost its socket; it can be repaired. */
+  repair?: string
 }
 
 export type ContainerState = 'created' | 'running' | 'paused' | 'restarting' | 'exited' | 'dead'
@@ -202,6 +204,8 @@ export interface TenderApi {
   engine: {
     status(): Promise<EngineStatus>
     reconnect(): Promise<EngineStatus>
+    /** Windows: restart Docker in a WSL distribution whose engine lost its socket, then reconnect. */
+    repairWsl(distro: string): Promise<EngineStatus>
     onStatus(cb: (s: EngineStatus) => void): Unsub
     onEvents(cb: (events: EngineEvent[]) => void): Unsub
   }
@@ -264,8 +268,8 @@ export interface TenderApi {
     check(): Promise<MigrationCheck>
     plan(distro: string): Promise<MigrationPlan>
     run(distro: string, itemIds: string[], opts: { start: boolean }, onEvent: (e: MigrationEvent) => void): Unsub
-    /** Opens a terminal that gives the distribution's socket back to its own engine (asks for the sudo password). */
-    fixSocket(distro: string): Promise<void>
+    /** Gives the distribution's socket back to its own engine (restarts Docker there, as root through WSL). */
+    repairSocket(distro: string): Promise<void>
   }
 }
 
@@ -276,7 +280,7 @@ export interface MigrationCheck {
   /** Docker Desktop's engine: where the containers are now. */
   source: { ok: boolean; version?: string; containers?: number; reason?: string }
   /** The Docker Engine inside WSL: where they go. */
-  target: { ok: boolean; distro?: string; version?: string; reason?: string; /** docker in this distribution answers as Docker Desktop (its WSL integration). */ hijacked?: string }
+  target: { ok: boolean; distro?: string; version?: string; reason?: string; /** docker in this distribution answers as Docker Desktop (its WSL integration). */ hijacked?: string; /** the distribution's engine runs but lost its socket */ lost?: string }
 }
 
 export interface MigrationItem {

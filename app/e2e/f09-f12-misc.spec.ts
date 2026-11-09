@@ -25,6 +25,15 @@ test.describe('F10 engine not running', () => {
     await expect(page.getByRole('heading', { name: 'The Docker engine is stopped' })).toBeVisible()
   })
 
+  test('F10-E3 Docker in WSL lost its socket: one click repairs it', async ({ page, open, scan }) => {
+    await open('#/containers')
+    await setEngine(page, 'error', 'connect ENOENT //./pipe/dockerDesktopLinuxEngine', 'Ubuntu')
+    await expect(page.getByRole('heading', { name: 'Docker in Ubuntu lost its socket' })).toBeVisible()
+    await scan('S01 lost socket')
+    await page.getByRole('button', { name: 'Repair Docker in Ubuntu' }).click()
+    await expect(page.getByRole('table', { name: 'Containers' })).toBeVisible({ timeout: 10_000 })
+  })
+
   test('F10-E2 settings stay usable while the engine is down', async ({ page, open, scan }) => {
     await open('#/containers')
     await setEngine(page, 'error', 'down')

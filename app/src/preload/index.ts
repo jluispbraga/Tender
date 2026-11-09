@@ -56,11 +56,12 @@ const tender: TenderApi = {
     check: () => call('migrate.check'),
     plan: (distro) => call('migrate.plan', distro),
     run: (distro, ids, opts, onEvent) => quiet(subscribe('migrate', [distro, ids, opts], onEvent)),
-    fixSocket: (distro) => call('migrate.fixSocket', distro),
+    repairSocket: (distro) => call('migrate.repairSocket', distro),
   },
   engine: {
     status: () => call('engine.status'),
     reconnect: () => call('engine.reconnect'),
+    repairWsl: (distro) => call('engine.repairWsl', distro),
     onStatus: (cb) => quiet(subscribe('status', [], cb)),
     onEvents: (cb) => quiet(subscribe('events', [], cb)),
   },

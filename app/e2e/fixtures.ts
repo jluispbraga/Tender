@@ -38,7 +38,7 @@ export const test = base.extend<Fixtures>({
 export { expect }
 
 /** The fake engine's test hook (only exists in the browser build). */
-export const setEngine = (page: Page, state: 'running' | 'stopped' | 'error', error?: string) =>
-  page.evaluate(([s, e]) => (window as unknown as { __tenderFake: { setEngine(s: string, e?: string): void } }).__tenderFake.setEngine(s!, e), [state, error] as const)
+export const setEngine = (page: Page, state: 'running' | 'stopped' | 'error', error?: string, repair?: string) =>
+  page.evaluate(([s, e, r]) => (window as unknown as { __tenderFake: { setEngine(s: string, e?: string, r?: string): void } }).__tenderFake.setEngine(s!, e, r), [state, error, repair] as const)
 
 export const row = (page: Page, table: string, text: string | RegExp) => page.getByRole('table', { name: table }).getByRole('row').filter({ hasText: text })

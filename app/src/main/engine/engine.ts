@@ -22,7 +22,7 @@ import {
   type VolumeUsage,
 } from '../../renderer/src/api/types'
 import { dockerOptions, resolveEndpoint, WINDOWS_PIPE, type Endpoint } from './endpoint'
-import { findWslEngine, pipeExists, WslBridge } from './wsl'
+import { findWslEngine, pipeExists, repairSocket, WslBridge } from './wsl'
 
 type Listener<T> = (v: T) => void
 
@@ -74,6 +74,8 @@ export class Engine {
   private bridge: WslBridge | null = null
   /** Why the WSL fallback found nothing, added to the unreachable message. */
   private wslMiss: string | null = null
+  /** A distribution whose engine runs but lost its socket: the gate offers to repair it. */
+  private wslLost: string | null = null
   private discovering: Promise<void> | null = null
   /** The pipe the WSL bridge stands in for: when it comes back (Docker Desktop started), switch back to it. */
   private bridged: string | null = null
@@ -135,12 +137,21 @@ export class Engine {
     const r = await findWslEngine()
     if (!r.found) {
       this.wslMiss = r.why
+      this.wslLost = r.lost ?? null
       return
     }
     this.wslMiss = null
+    this.wslLost = null
     this.bridge = await WslBridge.open(r.found.distro)
     this.bridged = pipe
     this.endpoint = { name: `wsl:${r.found.distro}`, kind: 'npipe', address: `wsl://${r.found.distro}`, source: `Docker in WSL (${r.found.distro}), since ${this.endpoint.address} is missing`, socketPath: this.bridge.pipe }
+  }
+
+  /** The user asked to give a WSL distribution's engine its socket back (S01). */
+  async repairWsl(distro: string): Promise<EngineStatus> {
+    await repairSocket(distro)
+    this.wslLost = null
+    return this.reconnect()
   }
 
   async reconnect(): Promise<EngineStatus> {
@@ -156,7 +167,7 @@ export class Engine {
   }
 
   private setStatus(s: EngineStatus) {
-    const changed = s.state !== this.status.state || s.error !== this.status.error
+    const changed = s.state !== this.status.state || s.error !== this.status.error || s.repair !== this.status.repair
     this.status = s
     if (changed) this.statusListeners.forEach((fn) => fn(s))
   }
@@ -195,7 +206,7 @@ export class Engine {
       this.eventStream = null
       this.failures++
       const wsl = this.wslMiss ? `; also looked in WSL: ${this.wslMiss}` : ''
-      this.setStatus({ state: 'error', endpoint: this.endpoint.address, error: `${toApiError(e).message} (from ${this.endpoint.source}${wsl})` })
+      this.setStatus({ state: 'error', endpoint: this.endpoint.address, error: `${toApiError(e).message} (from ${this.endpoint.source}${wsl})`, ...(this.wslLost ? { repair: this.wslLost } : {}) })
       // The distribution went away: drop the bridge so the next try looks again from the start.
       if (this.bridge) {
         this.closeBridge()

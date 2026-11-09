@@ -55,7 +55,7 @@ export async function runningDistros(): Promise<string[]> {
     .filter((d) => d && !d.startsWith('docker-desktop'))
 }
 
-export type Probe = { ok: true; distro: string; version: string } | { ok: false; distro: string; reason: string }
+export type Probe = { ok: true; distro: string; version: string } | { ok: false; distro: string; reason: string; lostSocket?: boolean }
 
 /** Asks the distribution's own Docker CLI whether its engine answers. */
 export async function probe(distro: string): Promise<Probe> {
@@ -63,6 +63,9 @@ export async function probe(distro: string): Promise<Probe> {
   const version = decode(r.stdout).trim()
   if (r.code === 0 && version) return { ok: true, distro, version }
   const err = decode(r.stderr).trim()
+  if (/cannot connect|is the docker daemon running/i.test(err) && (await socketLost(distro))) {
+    return { ok: false, distro, reason: 'its engine is running but lost its socket (Docker Desktop removes /var/run/docker.sock when it quits)', lostSocket: true }
+  }
   const reason = /permission denied/i.test(err)
     ? 'permission denied on the Docker socket (add your user to the docker group)'
     : /cannot connect|is the docker daemon running/i.test(err)
@@ -74,16 +77,40 @@ export async function probe(distro: string): Promise<Probe> {
 }
 
 /** The first running distribution whose engine answers, or why none did. */
-export async function findWslEngine(): Promise<{ found: Probe & { ok: true } } | { found: null; why: string }> {
+export async function findWslEngine(): Promise<{ found: Probe & { ok: true } } | { found: null; why: string; lost?: string }> {
   const distros = await runningDistros()
   if (!distros.length) return { found: null, why: 'no WSL distribution is running' }
   const misses: string[] = []
+  let lost: string | undefined
   for (const d of distros) {
     const p = await probe(d)
     if (p.ok) return { found: p }
+    if (p.lostSocket) lost ??= d
     misses.push(`${d}: ${p.reason}`)
   }
-  return { found: null, why: misses.join('; ') }
+  return { found: null, why: misses.join('; '), lost }
+}
+
+/**
+ * The distribution's Docker service runs, but /var/run/docker.sock is gone. Docker
+ * Desktop's WSL integration replaces that socket while it runs and deletes it when it
+ * quits, leaving the distribution's own engine running and unreachable.
+ */
+export async function socketLost(distro: string): Promise<boolean> {
+  const r = await run(['--distribution', distro, '--exec', 'sh', '-c', 'systemctl is-active --quiet docker && [ ! -S /var/run/docker.sock ]'], 10_000)
+  return r.code === 0
+}
+
+/**
+ * Gives the socket back by restarting the distribution's Docker service. WSL runs
+ * commands as root without a password (`wsl -u root`), so no sudo prompt. The restart
+ * stops the engine's containers; those with a restart policy come back.
+ */
+export async function repairSocket(distro: string): Promise<void> {
+  const r = await run(['--distribution', distro, '--user', 'root', '--exec', 'systemctl', 'restart', 'docker.socket', 'docker'], 90_000)
+  if (r.code !== 0) throw new Error(`Could not restart Docker in ${distro}: ${decode(r.stderr).trim() || `exit code ${r.code}`}`)
+  const p = await probe(distro)
+  if (!p.ok) throw new Error(`Docker in ${distro} restarted but still does not answer: ${p.reason}`)
 }
 
 /** A private named pipe that relays each connection to the engine inside `distro`. */
@@ -135,18 +162,10 @@ export class WslBridge {
 }
 
 /** What `docker info` calls the engine a distribution's CLI talks to, or why it can't tell. */
-export async function engineOs(distro: string): Promise<{ ok: true; os: string; version: string } | { ok: false; reason: string }> {
+export async function engineOs(distro: string): Promise<{ ok: true; os: string; version: string } | { ok: false; reason: string; lostSocket?: boolean }> {
   const r = await run(['--distribution', distro, '--exec', 'docker', 'info', '--format', '{{.OperatingSystem}}|{{.ServerVersion}}'], 15_000)
   const [os, version] = decode(r.stdout).trim().split('|')
   if (r.code === 0 && os) return { ok: true, os, version: version ?? '' }
   const p = await probe(distro)
-  return { ok: false, reason: p.ok ? 'docker info failed' : p.reason }
-}
-
-/** Opens a console window running `command` inside `distro`, for steps that need the user's sudo password. */
-export function openTerminal(distro: string, command: string[]) {
-  // `start` opens a new console; its first quoted argument is the window title. Callers pass
-  // fixed commands and a validated distribution name, so the line can be built as is.
-  const line = `/c start "Tender" ${WSL} --distribution ${distro} -- ${command.join(' ')}`
-  spawn('cmd.exe', [line], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref()
+  return p.ok ? { ok: false, reason: 'docker info failed' } : { ok: false, reason: p.reason, lostSocket: p.lostSocket }
 }

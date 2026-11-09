@@ -4,7 +4,7 @@ import { ApiError } from '../renderer/src/api/types'
 import type { Store } from './db'
 import { toApiError, type Engine } from './engine/engine'
 import * as migrate from './migrate/migrate'
-import { openTerminal } from './engine/wsl'
+import { repairSocket } from './engine/wsl'
 
 // The IPC surface from architecture.md ("API"). Three channels:
 //   tender:call   (route, args)         -> { ok, value } | { ok: false, error }
@@ -46,10 +46,11 @@ export function registerIpc(deps: IpcDeps) {
   const routes: Record<string, Route> = {
     'engine.status': { args: z.tuple([]), run: () => ({ ...engine.getStatus() }) },
     'engine.reconnect': { args: z.tuple([]), run: () => engine.reconnect() },
+    'engine.repairWsl': { args: z.tuple([distro]), run: ([d]) => engine.repairWsl(d) },
 
     'migrate.check': { args: z.tuple([]), run: () => migrate.check() },
     'migrate.plan': { args: z.tuple([distro]), run: ([d]) => migrate.plan(d) },
-    'migrate.fixSocket': { args: z.tuple([distro]), run: ([d]) => openTerminal(d, ['sudo', 'systemctl', 'restart', 'docker.socket', 'docker']) },
+    'migrate.repairSocket': { args: z.tuple([distro]), run: ([d]) => repairSocket(d) },
 
     'containers.list': { args: z.tuple([]), run: () => engine.listContainers() },
     'containers.inspect': { args: z.tuple([id]), run: ([i]) => engine.inspectContainer(i) },

@@ -65,9 +65,10 @@ export async function check(): Promise<MigrationCheck> {
       tgt = { ok: true, distro: d, version: r.version }
       break
     }
+    if (r.lostSocket && !tgt.hijacked && !tgt.lost) tgt = { ok: false, distro: d, lost: d, reason: `Docker in ${d} is running but lost its socket: Docker Desktop removes it when it quits or restarts.` }
     misses.push(`${d}: ${r.reason}`)
   }
-  if (!tgt.ok && !tgt.hijacked && distros.length) tgt = { ok: false, reason: `No Docker Engine answers in WSL (${misses.join('; ')}).` }
+  if (!tgt.ok && !tgt.hijacked && !tgt.lost && distros.length) tgt = { ok: false, reason: `No Docker Engine answers in WSL (${misses.join('; ')}).` }
   return { desktopInstalled, source: src, target: tgt }
 }
 
