@@ -74,6 +74,16 @@ function GeneralSection() {
           />
         </Field>
       </Group>
+      {api.platform === 'win32' && (
+        <Group title="Docker Desktop">
+          <p className="text-sm text-muted">
+            Containers, images and volumes made with Docker Desktop stay inside it. Tender can copy them into the Docker Engine inside WSL, so you can stop using Docker Desktop.{' '}
+            <a href={href('migrate')} className="text-link underline underline-offset-2">
+              Move from Docker Desktop
+            </a>
+          </p>
+        </Group>
+      )}
       <Group title="Startup">
         <Switch label="Start Tender when I sign in" checked={s.start_on_login} onCheckedChange={(v) => void save('start_on_login', v)} />
         <Switch label="Open the window when Tender starts" checked={s.open_on_start} onCheckedChange={(v) => void save('open_on_start', v)} />

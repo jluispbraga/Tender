@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { ApiError } from '../renderer/src/api/types'
 import type { Store } from './db'
 import { toApiError, type Engine } from './engine/engine'
+import * as migrate from './migrate/migrate'
+import { openTerminal } from './engine/wsl'
 
 // The IPC surface from architecture.md ("API"). Three channels:
 //   tender:call   (route, args)         -> { ok, value } | { ok: false, error }
@@ -12,6 +14,8 @@ import { toApiError, type Engine } from './engine/engine'
 
 const id = z.string().min(1).max(200)
 const ids = z.array(id).min(1).max(500)
+// WSL distribution names: letters, digits, dot, dash, underscore (they end up on a command line).
+const distro = z.string().regex(/^[A-Za-z0-9._-]{1,64}$/, 'Not a WSL distribution name.')
 const action = z.enum(['start', 'stop', 'restart', 'pause', 'unpause'])
 const portNum = z.string().regex(/^\d{1,5}$/).refine((s) => +s > 0 && +s < 65536)
 
@@ -42,6 +46,10 @@ export function registerIpc(deps: IpcDeps) {
   const routes: Record<string, Route> = {
     'engine.status': { args: z.tuple([]), run: () => ({ ...engine.getStatus() }) },
     'engine.reconnect': { args: z.tuple([]), run: () => engine.reconnect() },
+
+    'migrate.check': { args: z.tuple([]), run: () => migrate.check() },
+    'migrate.plan': { args: z.tuple([distro]), run: ([d]) => migrate.plan(d) },
+    'migrate.fixSocket': { args: z.tuple([distro]), run: ([d]) => openTerminal(d, ['sudo', 'systemctl', 'restart', 'docker.socket', 'docker']) },
 
     'containers.list': { args: z.tuple([]), run: () => engine.listContainers() },
     'containers.inspect': { args: z.tuple([id]), run: ([i]) => engine.inspectContainer(i) },
@@ -138,6 +146,7 @@ export function registerIpc(deps: IpcDeps) {
     logs: z.tuple([id, z.number().int().min(0).max(5000)]),
     stats: z.tuple([z.array(id).max(500)]),
     exec: z.tuple([id, z.enum(['/bin/sh', '/bin/bash', 'cmd.exe']), z.number().int().min(10).max(1000), z.number().int().min(4).max(500)]),
+    migrate: z.tuple([distro, z.array(z.string().max(300)).max(2000), z.object({ start: z.boolean() })]),
     pull: z.tuple([z.string().regex(/^[a-z0-9][a-z0-9._\/:@-]{0,255}$/i, 'That isn’t a valid image reference.')]),
   }
 
@@ -203,6 +212,9 @@ export function registerIpc(deps: IpcDeps) {
           })
           break
         }
+        case 'migrate':
+          stop = migrate.run(a[0], a[1], a[2], (ev) => to(ev))
+          break
         default:
           return { ok: false, error: { message: 'Bad subscription' } }
       }

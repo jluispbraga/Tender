@@ -259,7 +259,52 @@ export interface TenderApi {
     recent(): Promise<RecentItem[]>
     recordUse(item: RecentItem): Promise<void>
   }
+  /** Windows: move containers, images and volumes out of Docker Desktop into the engine inside WSL. */
+  migrate: {
+    check(): Promise<MigrationCheck>
+    plan(distro: string): Promise<MigrationPlan>
+    run(distro: string, itemIds: string[], opts: { start: boolean }, onEvent: (e: MigrationEvent) => void): Unsub
+    /** Opens a terminal that gives the distribution's socket back to its own engine (asks for the sudo password). */
+    fixSocket(distro: string): Promise<void>
+  }
 }
+
+// ---- moving from Docker Desktop (Windows) ----------------------------------------
+
+export interface MigrationCheck {
+  desktopInstalled: boolean
+  /** Docker Desktop's engine: where the containers are now. */
+  source: { ok: boolean; version?: string; containers?: number; reason?: string }
+  /** The Docker Engine inside WSL: where they go. */
+  target: { ok: boolean; distro?: string; version?: string; reason?: string; /** docker in this distribution answers as Docker Desktop (its WSL integration). */ hijacked?: string }
+}
+
+export interface MigrationItem {
+  id: string
+  kind: 'project' | 'container' | 'unused-images' | 'unused-volumes'
+  label: string
+  containers: string[]
+  images: string[]
+  volumes: string[]
+  /** Approximate: images shared between items count in each. */
+  bytes: number
+  running: number
+  /** Names that already exist in the target and will be left alone. */
+  conflicts: string[]
+}
+
+export interface MigrationPlan {
+  items: MigrationItem[]
+}
+
+export type MigrationStep = 'prepare' | 'images' | 'networks' | 'volumes' | 'containers' | 'start'
+
+export type MigrationEvent =
+  | { type: 'step'; step: MigrationStep; total: number }
+  | { type: 'item'; step: MigrationStep; name: string; status: 'working' | 'done' | 'skipped' | 'failed'; message?: string }
+  | { type: 'bytes'; name: string; done: number; total: number }
+  | { type: 'done'; moved: number; skipped: number; failed: number; cancelled?: boolean }
+  | { type: 'error'; message: string }
 
 /** Errors crossing the API carry the engine's HTTP status when there was one. */
 export class ApiError extends Error {

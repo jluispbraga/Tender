@@ -161,7 +161,7 @@ If you installed Docker Engine straight into a WSL distribution (no Docker Deskt
 
 There is no TCP port, no root and no change to the distribution. You do not need to set `DOCKER_HOST`; if you set one, it still wins.
 
-**Moving away from Docker Desktop?** Your existing containers, images and volumes live inside Docker Desktop's engine. [docs/migrate-from-docker-desktop.md](docs/migrate-from-docker-desktop.md) moves them to the engine inside WSL with one script, in two steps (export, then import).
+**Moving away from Docker Desktop?** Your existing containers, images and volumes live inside Docker Desktop's engine. Tender moves them to the engine inside WSL: the installer offers it when it finds Docker Desktop, and the **Move from Docker Desktop** page is always in Settings. [docs/migrate-from-docker-desktop.md](docs/migrate-from-docker-desktop.md) explains it, and also covers a command-line script.
 
 If your user is not in the distribution's `docker` group, the connection error says so. Fix it with `sudo usermod -aG docker $USER` inside WSL, then `wsl --terminate <distro>` and start the distribution again.
 

@@ -2,7 +2,18 @@
 
 Tender works with a Docker Engine installed straight into WSL 2, so you do not need Docker Desktop.
 
-Your containers, images and volumes, though, live inside Docker Desktop's own engine. Only Docker Desktop can open them, so moving them out is a one-time job. This guide does it with [`tools/migrate-from-docker-desktop.ps1`](../tools/migrate-from-docker-desktop.ps1).
+Your containers, images and volumes, though, live inside Docker Desktop's own engine. Only Docker Desktop can open them, so moving them out is a one-time job.
+
+## The easy way: inside Tender
+
+When the Windows installer finds Docker Desktop, it offers to help, and Tender opens **Move from Docker Desktop** on its first start. You can also reach that page any time from Settings or Troubleshoot. It:
+
+1. checks both engines and tells you what to fix: Docker Desktop open, Docker Engine installed in WSL, and the WSL integration that takes over the distribution's socket. It can open the terminal that gives the socket back.
+2. lists every Compose project and container with its size, so you pick what to move;
+3. streams images and volumes straight from one engine to the other, with no files on disk, then recreates networks and containers;
+4. starts the ones that were running.
+
+The rest of this guide does the same from the command line, with [`tools/migrate-from-docker-desktop.ps1`](../tools/migrate-from-docker-desktop.ps1). That is useful for scripting, or when the two engines can't run at the same time.
 
 Nothing is deleted from Docker Desktop at any point. If something goes wrong, your old setup is still there.
 

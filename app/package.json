@@ -72,7 +72,8 @@
     "files": [
       "out/**",
       "resources/**",
-      "package.json"
+      "package.json",
+      "!resources/installer.nsh"
     ],
     "asarUnpack": [
       "resources/**"

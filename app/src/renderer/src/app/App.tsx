@@ -17,6 +17,7 @@ import { SettingsPage } from '@/pages/settings/SettingsPage'
 import { TroubleshootPage } from '@/pages/troubleshoot/TroubleshootPage'
 import { NotificationsPage } from '@/pages/notifications/NotificationsPage'
 import { NotFound } from '@/pages/NotFound'
+import { MigratePage } from '@/pages/migrate/MigratePage'
 
 export function App() {
   return (
@@ -65,12 +66,15 @@ function Root() {
     case 'notifications':
       page = <NotificationsPage />
       break
+    case 'migrate':
+      page = <MigratePage />
+      break
     default:
       page = <NotFound />
   }
 
   // Settings, troubleshoot and notifications stay reachable with the engine down.
-  const needsEngine = !['settings', 'troubleshoot', 'notifications'].includes(section)
+  const needsEngine = !['settings', 'troubleshoot', 'notifications', 'migrate'].includes(section)
   return (
     <AppShell section={section}>
       {needsEngine ? <EngineGate>{page}</EngineGate> : page}

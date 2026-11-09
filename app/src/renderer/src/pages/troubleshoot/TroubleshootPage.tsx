@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { EnginePill } from '@/components/ui/shell'
 import { useToast } from '@/components/ui/toast'
 import { keys, useEngine } from '@/lib/queries'
+import { href } from '@/lib/router'
 
 /** S23: check the connection, reconnect, and copy what support would ask for. */
 export function TroubleshootPage() {
@@ -69,6 +70,12 @@ export function TroubleshootPage() {
                 <>
                   <li>Check that WSL 2 is installed and the distribution with Docker is running: <code className="font-mono text-xs text-fg">wsl --list --running</code></li>
                   <li>Docker installed straight into WSL needs no setup: Tender finds it in any running distribution, through that distribution’s own <code className="font-mono text-xs text-fg">docker</code> command.</li>
+                  <li>
+                    Containers made with Docker Desktop stay inside Docker Desktop.{' '}
+                    <a href={href('migrate')} className="text-link underline underline-offset-2">
+                      Move them to WSL
+                    </a>
+                  </li>
                 </>
               )}
               {api.platform === 'linux' && (

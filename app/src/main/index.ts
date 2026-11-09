@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { app, BrowserWindow, Menu, nativeImage, nativeTheme, session, Tray, type IpcMainInvokeEvent } from 'electron'
 import { Store } from './db'
@@ -166,6 +166,14 @@ app.whenReady().then(() => {
 
   createWindow()
   setupTray(settings.tray_enabled)
+
+  // The Windows installer leaves this file when it found Docker Desktop and the
+  // user ticked "help me move": open the move page once, on the first start.
+  const offer = join(app.getPath('userData'), 'offer-migration')
+  if (process.platform === 'win32' && existsSync(offer)) {
+    rmSync(offer, { force: true })
+    win!.webContents.once('did-finish-load', () => showWindow('#/migrate'))
+  }
   applyLoginItem(settings.start_on_login)
 
   // Dev only: TENDER_SMOKE=<file> runs that script in the page against

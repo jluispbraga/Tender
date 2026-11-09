@@ -52,6 +52,12 @@ const quiet = (s: { ready: Promise<void>; stop: () => void }) => {
 const tender: TenderApi = {
   kind: 'ipc',
   platform: process.platform,
+  migrate: {
+    check: () => call('migrate.check'),
+    plan: (distro) => call('migrate.plan', distro),
+    run: (distro, ids, opts, onEvent) => quiet(subscribe('migrate', [distro, ids, opts], onEvent)),
+    fixSocket: (distro) => call('migrate.fixSocket', distro),
+  },
   engine: {
     status: () => call('engine.status'),
     reconnect: () => call('engine.reconnect'),

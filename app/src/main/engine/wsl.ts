@@ -133,3 +133,20 @@ export class WslBridge {
     this.children.clear()
   }
 }
+
+/** What `docker info` calls the engine a distribution's CLI talks to, or why it can't tell. */
+export async function engineOs(distro: string): Promise<{ ok: true; os: string; version: string } | { ok: false; reason: string }> {
+  const r = await run(['--distribution', distro, '--exec', 'docker', 'info', '--format', '{{.OperatingSystem}}|{{.ServerVersion}}'], 15_000)
+  const [os, version] = decode(r.stdout).trim().split('|')
+  if (r.code === 0 && os) return { ok: true, os, version: version ?? '' }
+  const p = await probe(distro)
+  return { ok: false, reason: p.ok ? 'docker info failed' : p.reason }
+}
+
+/** Opens a console window running `command` inside `distro`, for steps that need the user's sudo password. */
+export function openTerminal(distro: string, command: string[]) {
+  // `start` opens a new console; its first quoted argument is the window title. Callers pass
+  // fixed commands and a validated distribution name, so the line can be built as is.
+  const line = `/c start "Tender" ${WSL} --distribution ${distro} -- ${command.join(' ')}`
+  spawn('cmd.exe', [line], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref()
+}

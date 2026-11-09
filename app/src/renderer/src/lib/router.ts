@@ -13,6 +13,7 @@ import { useSyncExternalStore } from 'react'
 //   #/settings/:section                S21, S22 (general | engine)
 //   #/troubleshoot                     S23
 //   #/notifications                    S24
+//   #/migrate                          move from Docker Desktop (Windows)
 //   #/design                           design-system gallery
 
 const subscribe = (cb: () => void) => {

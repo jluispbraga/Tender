@@ -10,6 +10,9 @@ import {
   type ImageRow,
   type LayerProgress,
   type LogLine,
+  type MigrationEvent,
+  type MigrationItem,
+  type MigrationStep,
   type Notification,
   type RecentItem,
   type Settings,
@@ -233,8 +236,57 @@ export function createFakeApi(): TenderApi {
   const pulls = new Map<string, { cancel: () => void }>()
   const activePullByRef = new Map<string, string>()
 
+  const fakeMigrationPlan: MigrationItem[] = [
+    { id: 'project:shop', kind: 'project', label: 'shop', containers: ['shop-web-1', 'shop-db-1', 'shop-worker-1'], images: ['sha256:shopweb', 'sha256:postgres17', 'sha256:shopworker'], volumes: ['shop-data'], bytes: 912_000_000, running: 2, conflicts: [] },
+    { id: 'project:analytics', kind: 'project', label: 'analytics', containers: ['clickhouse', 'grafana'], images: ['sha256:clickhouse', 'sha256:grafana'], volumes: ['analytics_ch-data'], bytes: 2_400_000_000, running: 0, conflicts: ['grafana'] },
+    { id: 'container:qdrant', kind: 'container', label: 'qdrant', containers: ['qdrant'], images: ['sha256:qdrant'], volumes: [], bytes: 210_000_000, running: 0, conflicts: [] },
+    { id: 'unused-images', kind: 'unused-images', label: 'Images no container uses (4)', containers: [], images: ['sha256:node22', 'sha256:python313', 'sha256:alpine', 'sha256:busybox'], volumes: [], bytes: 1_300_000_000, running: 0, conflicts: [] },
+  ]
+
   const api: TenderApi = {
     kind: 'fake',
+    migrate: {
+      async check() {
+        await sleep(300)
+        return { desktopInstalled: true, source: { ok: true, version: '29.4.3', containers: 9 }, target: { ok: true, distro: 'Ubuntu', version: '28.5.1' } }
+      },
+      async plan() {
+        await sleep(300)
+        return { items: fakeMigrationPlan }
+      },
+      run(_distro, ids, opts, onEvent) {
+        // Plays a short, believable move: every chosen item's images, volumes, containers.
+        const chosen = fakeMigrationPlan.filter((i) => ids.includes(i.id))
+        const script: MigrationEvent[] = []
+        const steps: [MigrationStep, string[]][] = [
+          ['images', [...new Set(chosen.flatMap((i) => i.images))]],
+          ['volumes', [...new Set(chosen.flatMap((i) => i.volumes))]],
+          ['containers', chosen.flatMap((i) => i.containers)],
+        ]
+        let moved = 0
+        let skipped = 0
+        for (const [step, names] of steps) {
+          if (!names.length) continue
+          script.push({ type: 'step', step, total: names.length })
+          for (const name of names) {
+            const taken = chosen.some((i) => i.conflicts.includes(name))
+            script.push({ type: 'item', step, name, status: 'working' })
+            if (step !== 'containers' && !taken) script.push({ type: 'bytes', name, done: 50, total: 100 })
+            script.push({ type: 'item', step, name, status: taken ? 'skipped' : 'done', message: taken ? 'already there' : undefined })
+            taken ? skipped++ : moved++
+          }
+        }
+        if (opts.start) script.push({ type: 'step', step: 'start', total: 0 })
+        script.push({ type: 'done', moved, skipped, failed: 0 })
+        let i = 0
+        const timer = setInterval(() => {
+          if (i >= script.length) return clearInterval(timer)
+          onEvent(script[i++])
+        }, 60)
+        return () => clearInterval(timer)
+      },
+      async fixSocket() {},
+    },
     platform: /Windows/.test(navigator.userAgent) ? 'win32' : /Mac OS/.test(navigator.userAgent) ? 'darwin' : 'linux',
     engine: {
       async status() {
