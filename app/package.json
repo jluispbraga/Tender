@@ -1,7 +1,7 @@
 {
   "name": "tender",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "tokens": "python ../replica/design/build_tokens.py ../replica/design/tokens.json src/renderer/src/styles",
