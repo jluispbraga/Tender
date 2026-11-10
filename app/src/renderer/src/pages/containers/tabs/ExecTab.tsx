@@ -84,11 +84,12 @@ export function ExecTab({ c }: { c: ContainerRow }) {
           label="Shell"
           value={chosen}
           onValueChange={setShell}
-          className="w-36"
+          className="w-52"
           options={[
             { value: '/bin/sh', label: '/bin/sh' },
             { value: '/bin/bash', label: '/bin/bash' },
             { value: 'cmd.exe', label: 'cmd.exe' },
+            { value: 'debug', label: 'Debug shell (BusyBox)' },
           ]}
         />
         <span role="status" className="text-muted">

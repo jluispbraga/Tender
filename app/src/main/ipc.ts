@@ -176,7 +176,7 @@ export function registerIpc(deps: IpcDeps) {
     notifications: z.tuple([]),
     logs: z.tuple([id, z.number().int().min(0).max(5000)]),
     stats: z.tuple([z.array(id).max(500)]),
-    exec: z.tuple([id, z.enum(['/bin/sh', '/bin/bash', 'cmd.exe']), z.number().int().min(10).max(1000), z.number().int().min(4).max(500)]),
+    exec: z.tuple([id, z.enum(['/bin/sh', '/bin/bash', 'cmd.exe', 'debug']), z.number().int().min(10).max(1000), z.number().int().min(4).max(500)]),
     installCli: z.tuple([]),
     setupWsl: z.tuple([distro]),
     migrate: z.tuple([distro, z.array(z.string().max(300)).max(2000), z.object({ start: z.boolean() })]),

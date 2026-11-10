@@ -552,6 +552,7 @@ export class Engine {
   // ---- exec ---------------------------------------------------------------------------
 
   async openExec(id: string, shell: string, cols: number, rows: number, onData: (d: string) => void, onExit: (code: number) => void) {
+    if (shell === 'debug') return this.openDebug(id, cols, rows, onData, onExit)
     const d = this.api()
     const c = d.getContainer(id)
     const info = await c.inspect().catch((e) => {
@@ -582,7 +583,7 @@ export class Engine {
     await exec.resize({ h: rows, w: cols }).catch(() => undefined)
     // A missing shell shows up as a quick exit with "executable file not found".
     setTimeout(() => {
-      if (ended && /executable file not found|no such file/i.test(firstOutput)) onData(`\r\n\x1b[33mThis image has no ${shell}. Try another shell from the list.\x1b[0m\r\n`)
+      if (ended && /executable file not found|no such file/i.test(firstOutput)) onData(`\r\n\x1b[33mThis image has no ${shell}. Pick “Debug shell (BusyBox)” from the list: it works even when the image has no shell at all.\x1b[0m\r\n`)
     }, 600)
     return {
       write: (data: string) => !ended && stream.write(data),
@@ -590,6 +591,80 @@ export class Engine {
       close: () => {
         ended = true
         stream.destroy()
+      },
+    }
+  }
+
+  /**
+   * A shell for a container that has none (distroless, scratch images). A
+   * BusyBox helper joins the container's process and network namespaces: its
+   * processes show in ps, its files are under /proc/1/root, its network is the
+   * helper's. The container itself is not changed, and the helper is removed
+   * when the shell ends.
+   */
+  private async openDebug(id: string, cols: number, rows: number, onData: (d: string) => void, onExit: (code: number) => void) {
+    const d = this.api()
+    const info = await d
+      .getContainer(id)
+      .inspect()
+      .catch((e) => {
+        throw toApiError(e)
+      })
+    const name = info.Name.replace(/^\//, '')
+    if (!info.State.Running) throw new ApiError(`${name} isn’t running. Start it to debug it.`, 409)
+    if (info.State.Paused) throw new ApiError('The container is paused. Resume it to debug it.', 409)
+    const image = 'busybox:1.36'
+    if (!(await d.getImage(image).inspect().catch(() => null))) {
+      onData(`Getting ${image} for the debug shell…\r\n`)
+      const s = (await d.pull(image)) as unknown as Readable
+      await new Promise<void>((resolve, reject) => {
+        s.on('data', () => undefined)
+        s.on('end', resolve)
+        s.on('error', reject)
+      })
+    }
+    const banner = [
+      `Debug shell for ${name} (BusyBox).`,
+      'Its processes: ps.  Its files: /proc/1/root (you are there).  Its network: this one.',
+      'Nothing here changes the container; this helper goes away when you exit.',
+      '',
+    ].join('\r\n')
+    const helper = await d.createContainer({
+      Image: image,
+      Cmd: ['sh', '-c', 'cd /proc/1/root 2>/dev/null; printf "%s\\r\\n" "$BANNER"; exec sh'],
+      Env: [`BANNER=${banner}`, 'TERM=xterm-256color', `COLUMNS=${cols}`, `LINES=${rows}`, 'PS1=debug:\\w# '],
+      Tty: true,
+      OpenStdin: true,
+      AttachStdin: true,
+      AttachStdout: true,
+      AttachStderr: true,
+      Labels: { 'io.github.tender.helper': 'debug', 'io.github.tender.debug-target': info.Id },
+      HostConfig: {
+        PidMode: `container:${info.Id}`,
+        NetworkMode: info.HostConfig.NetworkMode === 'host' ? 'host' : `container:${info.Id}`,
+        // Reading another process's /proc/<pid>/root needs ptrace rights.
+        CapAdd: ['SYS_PTRACE'],
+        AutoRemove: true,
+      },
+    })
+    const stream = (await helper.attach({ stream: true, stdin: true, stdout: true, stderr: true, hijack: true })) as unknown as NodeJS.ReadWriteStream & { destroy(): void }
+    let ended = false
+    stream.on('data', (chunk: Buffer) => onData(chunk.toString('utf8')))
+    stream.on('end', async () => {
+      if (ended) return
+      ended = true
+      const code = (await helper.inspect().catch(() => null))?.State?.ExitCode ?? 0
+      onExit(code)
+    })
+    await helper.start()
+    await helper.resize({ h: rows, w: cols }).catch(() => undefined)
+    return {
+      write: (data: string) => !ended && stream.write(data),
+      resize: (c2: number, r2: number) => void helper.resize({ h: r2, w: c2 }).catch(() => undefined),
+      close: () => {
+        ended = true
+        stream.destroy()
+        void helper.remove({ force: true }).catch(() => undefined)
       },
     }
   }
