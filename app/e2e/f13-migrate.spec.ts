@@ -48,3 +48,25 @@ test.describe('F14 Docker tools on Windows', () => {
     await expect(page.getByText('The Docker CLI uses the context', { exact: false })).toHaveCount(0)
   })
 })
+
+test.describe('F15 set up Docker in WSL', () => {
+  test('F15-H1 pick a distribution, see the plan, install, see every step', async ({ page, open, scan }) => {
+    await open('#/setup')
+    await expect(page.getByRole('radio', { name: /Ubuntu/ })).toBeChecked()
+    const box = page.getByRole('region', { name: 'Docker in Ubuntu' })
+    await expect(box).toContainText('No Docker yet')
+    await expect(box).toContainText('turn on systemd in /etc/wsl.conf')
+    await scan('S27 set up Docker in WSL')
+    await page.getByRole('button', { name: 'Install Docker Engine in Ubuntu' }).click()
+    await expect(page.getByText('Docker Engine is installed and running in Ubuntu.')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByRole('list', { name: 'Setup progress' })).toContainText('Docker 29.4.3 answers')
+    await expect(page.getByLabel('Command output')).toContainText('Setting up docker-ce')
+    await scan('S27 set up done')
+  })
+
+  test('F15-H2 a distribution that already runs Docker says so', async ({ page, open }) => {
+    await open('#/setup')
+    await page.getByRole('radio', { name: /Debian/ }).check()
+    await expect(page.getByText('Docker Engine is already set up here.')).toBeVisible()
+  })
+})

@@ -14,6 +14,7 @@ import { useSyncExternalStore } from 'react'
 //   #/troubleshoot                     S23
 //   #/notifications                    S24
 //   #/migrate                          move from Docker Desktop (Windows)
+//   #/setup                            install Docker Engine in WSL (Windows)
 //   #/design                           design-system gallery
 
 const subscribe = (cb: () => void) => {

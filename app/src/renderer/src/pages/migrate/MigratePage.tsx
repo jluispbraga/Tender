@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Switch } from '@/components/ui/switch'
 import { bytes } from '@/lib/format'
-import { navigate } from '@/lib/router'
+import { href, navigate } from '@/lib/router'
 
 /**
  * Moves containers, images and volumes from Docker Desktop into the Docker
@@ -64,7 +64,10 @@ function Checks({ check, loading, onRecheck }: { check?: MigrationCheck; loading
             {(check.target.hijacked || check.target.lost) && <RepairSteps distro={(check.target.hijacked ?? check.target.lost)!} hijacked={!!check.target.hijacked} onDone={onRecheck} />}
             {!check.target.ok && !check.target.hijacked && !check.target.lost && (
               <p className="text-sm text-muted">
-                Install Docker Engine in your WSL distribution (Docker’s guide “Install Docker Engine on Ubuntu”), add your user to the <code className="font-mono text-xs text-fg">docker</code> group, and keep the distribution running.
+                <a href={href('setup')} className="text-link underline underline-offset-2">
+                  Set up Docker in WSL
+                </a>{' '}
+                installs Docker Engine in your distribution for you. Then keep the distribution running.
               </p>
             )}
           </CheckRow>

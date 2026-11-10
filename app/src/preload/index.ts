@@ -52,6 +52,11 @@ const quiet = (s: { ready: Promise<void>; stop: () => void }) => {
 const tender: TenderApi = {
   kind: 'ipc',
   platform: process.platform,
+  setup: {
+    distros: () => call('setup.distros'),
+    inspect: (distro) => call('setup.inspect', distro),
+    install: (distro, onEvent) => quiet(subscribe('setupWsl', [distro], onEvent)),
+  },
   tools: {
     status: () => call('tools.status'),
     installCli: (onStep) => quiet(subscribe('installCli', [], onStep)),

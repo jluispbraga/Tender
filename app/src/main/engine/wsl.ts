@@ -20,7 +20,7 @@ interface Run {
   stderr: Buffer
 }
 
-function run(args: string[], timeout: number): Promise<Run> {
+export function run(args: string[], timeout: number): Promise<Run> {
   return new Promise((resolve) => {
     execFile(WSL, args, { encoding: 'buffer', timeout, windowsHide: true }, (err, stdout, stderr) => {
       const code = err ? (typeof (err as { code?: unknown }).code === 'number' ? ((err as { code: number }).code as number) : null) : 0

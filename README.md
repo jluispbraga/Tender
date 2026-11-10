@@ -86,6 +86,7 @@ Docker objects remain managed by the Docker Engine. Tender's SQLite database sto
 | Linux (system service) | Nothing, as long as your user is in the `docker` group. |
 | Linux (rootless Docker) | Nothing: Tender finds `$XDG_RUNTIME_DIR/docker.sock`. |
 | Windows, Docker Engine installed inside WSL 2 | Nothing: keep the distribution running and Tender bridges to it (see below). |
+| Windows, WSL 2 without Docker yet | **Set up Docker in WSL** in Tender installs Docker Engine in a Debian or Ubuntu distribution, following Docker's own instructions: systemd, Docker's apt repository, your user in the `docker` group. |
 | Windows, Docker Desktop or dockerd as a service | Nothing: Tender uses the default named pipe. |
 | Another machine | Set `DOCKER_HOST` (for example `ssh://user@host`) or a Docker context. |
 

@@ -265,6 +265,12 @@ export interface TenderApi {
     recent(): Promise<RecentItem[]>
     recordUse(item: RecentItem): Promise<void>
   }
+  /** Windows: install Docker Engine inside a WSL distribution. */
+  setup: {
+    distros(): Promise<WslDistro[]>
+    inspect(distro: string): Promise<WslDistroDetail>
+    install(distro: string, onEvent: (e: WslSetupEvent) => void): Unsub
+  }
   /** Windows: what Docker tools on Windows need (the standard pipe, the CLI). */
   tools: {
     status(): Promise<WindowsTools>
@@ -280,6 +286,35 @@ export interface TenderApi {
     repairSocket(distro: string): Promise<void>
   }
 }
+
+// ---- Docker Engine inside WSL -----------------------------------------------------
+
+export interface WslDistro {
+  name: string
+  isDefault: boolean
+  running: boolean
+  /** WSL 1 or 2 */
+  version: number
+}
+
+export interface WslDistroDetail {
+  name: string
+  os: string
+  /** Debian or Ubuntu family: Docker's apt repository serves it */
+  supported: boolean
+  systemd: boolean
+  /** desktop-cli: only Docker Desktop's integration CLI */
+  docker: 'none' | 'cli-only' | 'desktop-cli' | 'installed' | 'running'
+  user: string
+}
+
+export type WslSetupStep = 'systemd' | 'packages' | 'group' | 'service' | 'check'
+
+export type WslSetupEvent =
+  | { type: 'step'; step: WslSetupStep; status: 'working' | 'done' | 'failed'; detail?: string }
+  | { type: 'line'; line: string }
+  | { type: 'done'; alreadyInstalled?: boolean }
+  | { type: 'error'; message: string }
 
 // ---- Docker tools on Windows ------------------------------------------------------
 

@@ -19,6 +19,7 @@ import {
   type StatsSample,
   type VolumeRow,
   type WindowsTools,
+  type WslSetupEvent,
 } from '../types'
 import { bootLines, chatter, flavour, seedContainers, seedImages, seedLayers, seedVolumes } from './seed'
 import { createFakeShell } from './shell'
@@ -249,6 +250,41 @@ export function createFakeApi(): TenderApi {
 
   const api: TenderApi = {
     kind: 'fake',
+    setup: {
+      async distros() {
+        await sleep(150)
+        return [
+          { name: 'Ubuntu', isDefault: true, running: true, version: 2 },
+          { name: 'Debian', isDefault: false, running: false, version: 2 },
+        ]
+      },
+      async inspect(name) {
+        await sleep(250)
+        return name === 'Ubuntu'
+          ? { name, os: 'Ubuntu 24.04.1 LTS', supported: true, systemd: false, docker: 'none', user: 'you' }
+          : { name, os: 'Debian GNU/Linux 12 (bookworm)', supported: true, systemd: true, docker: 'running', user: 'you' }
+      },
+      install(_name, onEvent) {
+        const script: WslSetupEvent[] = [
+          { type: 'step', step: 'systemd', status: 'working' },
+          { type: 'line', line: 'systemd turned on in /etc/wsl.conf' },
+          { type: 'step', step: 'systemd', status: 'done', detail: 'restarted the distribution with systemd' },
+          { type: 'step', step: 'packages', status: 'working' },
+          { type: 'line', line: 'Setting up docker-ce (5:29.4.3-1~ubuntu.24.04~noble) ...' },
+          { type: 'step', step: 'packages', status: 'done' },
+          { type: 'step', step: 'group', status: 'working' },
+          { type: 'step', step: 'group', status: 'done', detail: 'added you to the docker group' },
+          { type: 'step', step: 'service', status: 'working' },
+          { type: 'step', step: 'service', status: 'done' },
+          { type: 'step', step: 'check', status: 'working' },
+          { type: 'step', step: 'check', status: 'done', detail: 'Docker 29.4.3 answers' },
+          { type: 'done' },
+        ]
+        let i = 0
+        const timer = setInterval(() => (i < script.length ? onEvent(script[i++]) : clearInterval(timer)), 60)
+        return () => clearInterval(timer)
+      },
+    },
     tools: {
       async status() {
         await sleep(200)

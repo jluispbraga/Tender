@@ -4,6 +4,7 @@ import { AlertTriangle, Check, Download, Loader2, X } from 'lucide-react'
 import { api, type Settings, type ToolInstallEvent } from '@/api'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
+import { href } from '@/lib/router'
 
 const stepName = { cli: 'Docker CLI', compose: 'Docker Compose', buildx: 'Buildx', path: 'Add to your PATH' } as const
 
@@ -51,6 +52,13 @@ export function WindowsTools({ settings, save }: { settings: Settings; save: <K 
           docker.exe, the VS Code Docker extension, Testcontainers and IDEs look for Docker at <code className="font-mono text-xs text-fg">//./pipe/docker_engine</code>. Tender answers there with the engine in WSL. {pipeText} Keep Tender in the notification area (and start it at sign-in) so the pipe is always there.
         </p>
       </div>
+
+      <p className="text-sm text-muted">
+        No engine in WSL yet?{' '}
+        <a href={href('setup')} className="text-link underline underline-offset-2">
+          Set up Docker in WSL
+        </a>
+      </p>
 
       <div className="flex flex-col gap-2">
         <p className="text-base text-fg">Docker CLI</p>

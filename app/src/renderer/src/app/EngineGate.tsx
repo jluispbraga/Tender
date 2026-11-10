@@ -92,7 +92,11 @@ export function EngineGate({ children }: { children: ReactNode }) {
         </div>
         {api.platform === 'win32' && !starting && (
           <p className="text-sm text-muted">
-            Were your containers in Docker Desktop?{' '}
+            No Docker in WSL yet?{' '}
+            <a href={href('setup')} className="text-link underline underline-offset-2">
+              Set it up
+            </a>
+            . Were your containers in Docker Desktop?{' '}
             <a href={href('migrate')} className="text-link underline underline-offset-2">
               Move them to WSL
             </a>

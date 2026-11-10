@@ -5,6 +5,7 @@ import type { Store } from './db'
 import { toApiError, type Engine } from './engine/engine'
 import * as migrate from './migrate/migrate'
 import * as tools from './tools/windows-tools'
+import * as setup from './tools/wsl-setup'
 import type { PipeShare } from './tools/windows-tools'
 import { repairSocket } from './engine/wsl'
 
@@ -52,6 +53,8 @@ export function registerIpc(deps: IpcDeps) {
     'engine.reconnect': { args: z.tuple([]), run: () => engine.reconnect() },
     'engine.repairWsl': { args: z.tuple([distro]), run: ([d]) => engine.repairWsl(d) },
 
+    'setup.distros': { args: z.tuple([]), run: () => setup.listDistros() },
+    'setup.inspect': { args: z.tuple([distro]), run: ([d]) => setup.detail(d) },
     'tools.status': { args: z.tuple([]), run: () => tools.status(deps.share) },
     'tools.useDefaultContext': { args: z.tuple([]), run: () => tools.useDefaultContext() },
     'migrate.check': { args: z.tuple([]), run: () => migrate.check() },
@@ -154,6 +157,7 @@ export function registerIpc(deps: IpcDeps) {
     stats: z.tuple([z.array(id).max(500)]),
     exec: z.tuple([id, z.enum(['/bin/sh', '/bin/bash', 'cmd.exe']), z.number().int().min(10).max(1000), z.number().int().min(4).max(500)]),
     installCli: z.tuple([]),
+    setupWsl: z.tuple([distro]),
     migrate: z.tuple([distro, z.array(z.string().max(300)).max(2000), z.object({ start: z.boolean() })]),
     pull: z.tuple([z.string().regex(/^[a-z0-9][a-z0-9._\/:@-]{0,255}$/i, 'That isn’t a valid image reference.')]),
   }
@@ -229,6 +233,9 @@ export function registerIpc(deps: IpcDeps) {
           )
           break
         }
+        case 'setupWsl':
+          stop = setup.install(a[0], (ev) => to(ev))
+          break
         case 'migrate':
           stop = migrate.run(a[0], a[1], a[2], (ev) => to(ev))
           break
