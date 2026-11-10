@@ -52,6 +52,10 @@ const quiet = (s: { ready: Promise<void>; stop: () => void }) => {
 const tender: TenderApi = {
   kind: 'ipc',
   platform: process.platform,
+  resources: {
+    status: () => call('resources.status'),
+    act: (a) => call('resources.act', a),
+  },
   doctor: {
     check: () => call('doctor.check'),
     fix: (id, distro) => call('doctor.fix', id, distro),

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Bell, Box, Database, Layers, LifeBuoy, Search, Settings as SettingsIcon } from 'lucide-react'
+import { Bell, Box, Database, Gauge, Layers, LifeBuoy, Search, Settings as SettingsIcon } from 'lucide-react'
 import { CommandPalette } from '@/components/ui/command-palette'
 import { EnginePill, ResourceMeter, SidebarNav } from '@/components/ui/shell'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -91,6 +91,7 @@ export function AppShell({ section, children }: { section: string; children: Rea
               { key: 'containers', label: 'Containers', icon: <Box />, count: containers.data?.length },
               { key: 'images', label: 'Images', icon: <Layers />, count: images.data?.length },
               { key: 'volumes', label: 'Volumes', icon: <Database />, count: volumes.data?.length },
+              ...(api.platform === 'win32' ? [{ key: 'resources', label: 'Memory and disk', icon: <Gauge /> }] : []),
             ]}
           />
         </aside>

@@ -20,6 +20,7 @@ import {
   type VolumeRow,
   type WindowsTools,
   type WslSetupEvent,
+  type WslResources,
 } from '../types'
 import { bootLines, chatter, flavour, seedContainers, seedImages, seedLayers, seedVolumes } from './seed'
 import { createFakeShell } from './shell'
@@ -240,6 +241,13 @@ export function createFakeApi(): TenderApi {
   const activePullByRef = new Map<string, string>()
 
   let fakeDoctorFixed = false
+  const fakeResources: WslResources = {
+    memory: { vmBytes: 3_050_000_000, hostBytes: 16_600_000_000, limit: null, reclaim: 'disabled' },
+    disks: [{ distro: 'Ubuntu', path: 'C:\Users\you\AppData\Local\Packages\Ubuntu\LocalState\ext4.vhdx', fileBytes: 59_000_000_000, usedBytes: 41_000_000_000, sparse: false, running: true, version: 2 }],
+    sparseByDefault: false,
+    buildCache: { total: 6_200_000_000, reclaimable: 5_900_000_000 },
+    wslconfig: 'C:\Users\you\.wslconfig',
+  }
   let fakeTools: WindowsTools = { pipe: { state: 'serving', distro: 'Ubuntu' }, cli: null, compose: null, buildx: null, context: 'desktop-linux', contextUsesPipe: false, binOnPath: false }
 
   const fakeMigrationPlan: MigrationItem[] = [
@@ -251,6 +259,22 @@ export function createFakeApi(): TenderApi {
 
   const api: TenderApi = {
     kind: 'fake',
+    resources: {
+      async status() {
+        await sleep(200)
+        return { ...fakeResources, disks: fakeResources.disks.map((d) => ({ ...d })) }
+      },
+      async act(a) {
+        await sleep(200)
+        if (a.kind === 'reclaim') fakeResources.memory.reclaim = a.mode
+        if (a.kind === 'limit') fakeResources.memory.limit = a.gb ? `${a.gb}GB` : null
+        if (a.kind === 'sparse-default') fakeResources.sparseByDefault = a.on
+        if (a.kind === 'make-sparse') fakeResources.disks = fakeResources.disks.map((d) => (d.distro === a.distro ? { ...d, sparse: true } : d))
+        if (a.kind === 'trim') fakeResources.disks = fakeResources.disks.map((d) => (d.distro === a.distro ? { ...d, fileBytes: d.usedBytes ?? d.fileBytes } : d))
+        if (a.kind === 'prune-build-cache') fakeResources.buildCache = { total: 0, reclaimable: 0 }
+        return a.kind === 'trim' ? '/: 4.2 GiB (4509715660 bytes) trimmed' : 'Saved.'
+      },
+    },
     doctor: {
       async check() {
         await sleep(400)

@@ -265,6 +265,11 @@ export interface TenderApi {
     recent(): Promise<RecentItem[]>
     recordUse(item: RecentItem): Promise<void>
   }
+  /** Windows: WSL's memory and disks, and the settings that keep them in check. */
+  resources: {
+    status(): Promise<WslResources>
+    act(a: ResourceAction): Promise<string>
+  }
   /** Everything Tender depends on, checked, each problem with its fix. */
   doctor: {
     check(): Promise<DoctorCheck[]>
@@ -291,6 +296,31 @@ export interface TenderApi {
     repairSocket(distro: string): Promise<void>
   }
 }
+
+// ---- WSL memory and disk -----------------------------------------------------------
+
+export interface WslResources {
+  memory: {
+    /** What the WSL VM holds right now (vmmemWSL). */
+    vmBytes: number
+    hostBytes: number
+    /** [wsl2] memory in .wslconfig, e.g. "8GB"; null: WSL's default (half the RAM). */
+    limit: string | null
+    reclaim: 'gradual' | 'dropCache' | 'disabled'
+  }
+  disks: { distro: string; path: string; fileBytes: number; usedBytes?: number; sparse: boolean; running: boolean; version: number }[]
+  sparseByDefault: boolean
+  buildCache: { total: number; reclaimable: number } | null
+  wslconfig: string
+}
+
+export type ResourceAction =
+  | { kind: 'reclaim'; mode: 'gradual' | 'dropCache' | 'disabled' }
+  | { kind: 'limit'; gb: number | null }
+  | { kind: 'sparse-default'; on: boolean }
+  | { kind: 'make-sparse'; distro: string }
+  | { kind: 'trim'; distro: string }
+  | { kind: 'prune-build-cache' }
 
 // ---- the Doctor ------------------------------------------------------------------
 

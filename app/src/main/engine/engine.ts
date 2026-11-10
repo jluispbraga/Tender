@@ -673,6 +673,23 @@ export class Engine {
     return this.dfCache.value
   }
 
+  /** Build cache: total, and how much is not in use (what pruning frees). */
+  async buildCache(): Promise<{ total: number; reclaimable: number }> {
+    return this.call(async (d) => {
+      const df = (await this.systemDf(d)) as { BuildCache?: { Size: number; InUse: boolean; Shared: boolean }[] }
+      const c = df.BuildCache ?? []
+      return { total: c.reduce((n, x) => n + (x.Shared ? 0 : x.Size), 0), reclaimable: c.filter((x) => !x.InUse && !x.Shared).reduce((n, x) => n + x.Size, 0) }
+    })
+  }
+
+  async pruneBuildCache(): Promise<number> {
+    return this.call(async (d) => {
+      const r = (await d.pruneBuilder()) as { SpaceReclaimed?: number }
+      this.dfCache = null
+      return r.SpaceReclaimed ?? 0
+    })
+  }
+
   async diskUsage(): Promise<DiskUsage> {
     return this.call(async (d) => {
       const df = (await this.systemDf(d)) as { LayersSize?: number; Images?: { Id: string; Size: number; SharedSize: number; Containers: number }[] }

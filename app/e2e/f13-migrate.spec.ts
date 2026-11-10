@@ -85,3 +85,23 @@ test.describe('F16 checkup', () => {
     await expect(doctor).toContainText('1 thing needs attention')
   })
 })
+
+test.describe('F17 WSL memory and disk', () => {
+  test('F17-H1 memory reclaim, a sparse disk, giving space back, clearing build cache', async ({ page, open, scan }) => {
+    await open('#/containers')
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /Memory and disk/ }).click()
+    await expect(page.getByRole('heading', { name: 'Memory and disk', level: 1 })).toBeVisible()
+    await expect(page.getByRole('meter', { name: 'WSL holds' })).toBeVisible()
+    await expect(page.getByText('could go back to Windows')).toBeVisible()
+    await scan('S28 memory and disk')
+    await page.getByRole('combobox', { name: 'Give memory back' }).click()
+    await page.getByRole('option', { name: 'Gradually (recommended)' }).click()
+    await expect(page.getByRole('combobox', { name: 'Give memory back' })).toContainText('Gradually')
+    await page.getByRole('button', { name: 'Make it sparse' }).click()
+    await expect(page.getByText('sparse disk', { exact: false }).first()).toBeVisible()
+    await page.getByRole('button', { name: 'Give space back now' }).click()
+    await expect(page.getByText('trimmed', { exact: false }).first()).toBeVisible()
+    await page.getByRole('button', { name: 'Clear unused build cache' }).click()
+    await expect(page.getByRole('button', { name: 'Clear unused build cache' })).toBeDisabled()
+  })
+})

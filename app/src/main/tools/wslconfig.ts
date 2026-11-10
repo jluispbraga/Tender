@@ -27,8 +27,8 @@ export function readWslconfig(): Record<string, Record<string, string>> {
   return out
 }
 
-/** Sets one key, keeping the rest of the file as it is. */
-export function setWslconfig(section: string, key: string, value: string) {
+/** Sets one key (null removes it), keeping the rest of the file as it is. */
+export function setWslconfig(section: string, key: string, value: string | null) {
   const path = wslconfigPath()
   const lines = existsSync(path) ? readFileSync(path, 'utf8').split(/\r?\n/) : []
   const want = section.toLowerCase()
@@ -44,11 +44,14 @@ export function setWslconfig(section: string, key: string, value: string) {
     if (s[1].trim().toLowerCase() === want) start = i
   }
   if (start < 0) {
+    if (value === null) return
     if (lines.length && lines[lines.length - 1].trim() !== '') lines.push('')
     lines.push(`[${section}]`, `${key}=${value}`)
   } else {
     const at = lines.slice(start + 1, end).findIndex((l) => new RegExp(`^\\s*${key}\\s*=`, 'i').test(l))
-    if (at >= 0) lines[start + 1 + at] = `${key}=${value}`
+    if (at >= 0 && value === null) lines.splice(start + 1 + at, 1)
+    else if (at >= 0) lines[start + 1 + at] = `${key}=${value}`
+    else if (value === null) return
     else {
       // After the section's last non-empty line.
       let insert = end

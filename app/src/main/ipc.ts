@@ -7,6 +7,7 @@ import * as migrate from './migrate/migrate'
 import * as tools from './tools/windows-tools'
 import * as setup from './tools/wsl-setup'
 import * as doctor from './tools/doctor'
+import * as resources from './tools/resources'
 import type { PipeShare } from './tools/windows-tools'
 import { repairSocket } from './engine/wsl'
 
@@ -54,6 +55,20 @@ export function registerIpc(deps: IpcDeps) {
     'engine.reconnect': { args: z.tuple([]), run: () => engine.reconnect() },
     'engine.repairWsl': { args: z.tuple([distro]), run: ([d]) => engine.repairWsl(d) },
 
+    'resources.status': { args: z.tuple([]), run: () => resources.status(engine) },
+    'resources.act': {
+      args: z.tuple([
+        z.discriminatedUnion('kind', [
+          z.object({ kind: z.literal('reclaim'), mode: z.enum(['gradual', 'dropCache', 'disabled']) }),
+          z.object({ kind: z.literal('limit'), gb: z.number().int().min(2).max(1024).nullable() }),
+          z.object({ kind: z.literal('sparse-default'), on: z.boolean() }),
+          z.object({ kind: z.literal('make-sparse'), distro }),
+          z.object({ kind: z.literal('trim'), distro }),
+          z.object({ kind: z.literal('prune-build-cache') }),
+        ]),
+      ]),
+      run: ([a]) => resources.act(engine, a),
+    },
     'doctor.check': { args: z.tuple([]), run: () => doctor.check(engine, deps.share) },
     'doctor.fix': {
       args: z.tuple([z.enum(['wsl-update', 'start-distro', 'repair-socket', 'start-docker', 'docker-group', 'dns-tunneling', 'default-context']), distro.optional()]),
