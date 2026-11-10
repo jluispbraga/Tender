@@ -79,6 +79,18 @@ export class Engine {
   private discovering: Promise<void> | null = null
   /** The pipe the WSL bridge stands in for: when it comes back (Docker Desktop started), switch back to it. */
   private bridged: string | null = null
+  /** A pipe Tender itself serves (docker_engine, for Windows tools): never mistaken for an engine. */
+  servedPipe: string | null = null
+
+  /** A named pipe with an engine behind it, other than the one Tender serves itself. */
+  private pipeUp(name: string) {
+    return name !== this.servedPipe && pipeExists(name)
+  }
+
+  /** The WSL distribution Tender is talking to, when it bridges to one and the engine answers. */
+  get wslDistro(): string | null {
+    return this.endpoint.name.startsWith('wsl:') && this.status.state === 'running' ? this.endpoint.name.slice(4) : null
+  }
 
   get currentEndpoint() {
     return this.endpoint
@@ -133,7 +145,7 @@ export class Engine {
     // Dev only: pretend the default pipe is missing, to exercise this path next to Docker Desktop.
     if (this.endpoint.address === WINDOWS_PIPE && !app.isPackaged && process.env.TENDER_DEFAULT_PIPE) this.endpoint = { ...this.endpoint, address: `npipe:////./pipe/${process.env.TENDER_DEFAULT_PIPE}` }
     const pipe = this.endpoint.address.replace(/^npipe:\/\/\/\/\.\/pipe\//, '')
-    if (pipeExists(pipe)) return
+    if (this.pipeUp(pipe)) return
     const r = await findWslEngine()
     if (!r.found) {
       this.wslMiss = r.why
@@ -198,7 +210,7 @@ export class Engine {
       })
       if (!this.eventStream) void this.watchEvents()
       // The engine Tender was told to use is back: prefer it over the WSL stand-in.
-      if (this.bridged && pipeExists(this.bridged)) void this.reconnect()
+      if (this.bridged && this.pipeUp(this.bridged)) void this.reconnect()
       else this.schedulePing(15_000)
     } catch (e) {
       this.docker = null

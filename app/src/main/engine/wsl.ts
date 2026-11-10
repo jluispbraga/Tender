@@ -123,8 +123,8 @@ export class WslBridge {
     private server: Server,
   ) {}
 
-  static open(distro: string): Promise<WslBridge> {
-    const pipe = `\\\\.\\pipe\\tender-wsl-${process.pid}-${randomBytes(6).toString('hex')}`
+  /** `pipe`: the full pipe path to serve on; by default a private, random one. */
+  static open(distro: string, pipe = `\\\\.\\pipe\\tender-wsl-${process.pid}-${randomBytes(6).toString('hex')}`): Promise<WslBridge> {
     const children = new Set<ChildProcess>()
     const server = createServer((sock) => {
       const child = spawn(WSL, ['--distribution', distro, '--exec', 'docker', 'system', 'dial-stdio'], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] })

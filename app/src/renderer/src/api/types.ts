@@ -180,6 +180,8 @@ export interface Settings {
   exec_default_shell: string
   log_tail_lines: number
   tray_enabled: boolean
+  /** Windows: serve //./pipe/docker_engine from the engine in WSL, for docker.exe, IDEs and other tools. */
+  share_docker_pipe: boolean
 }
 
 export type GridView = 'containers' | 'images' | 'volumes'
@@ -263,6 +265,12 @@ export interface TenderApi {
     recent(): Promise<RecentItem[]>
     recordUse(item: RecentItem): Promise<void>
   }
+  /** Windows: what Docker tools on Windows need (the standard pipe, the CLI). */
+  tools: {
+    status(): Promise<WindowsTools>
+    installCli(onStep: (s: ToolInstallEvent) => void): Unsub
+    useDefaultContext(): Promise<void>
+  }
   /** Windows: move containers, images and volumes out of Docker Desktop into the engine inside WSL. */
   migrate: {
     check(): Promise<MigrationCheck>
@@ -272,6 +280,25 @@ export interface TenderApi {
     repairSocket(distro: string): Promise<void>
   }
 }
+
+// ---- Docker tools on Windows ------------------------------------------------------
+
+export interface WindowsTools {
+  /** serving: Tender answers on //./pipe/docker_engine; taken: something else does (Docker Desktop); waiting: no WSL engine yet. */
+  pipe: { state: 'off' | 'serving' | 'taken' | 'waiting'; distro?: string }
+  cli: { path: string; version: string; /** installed by Tender */ own: boolean } | null
+  compose: string | null
+  buildx: string | null
+  /** The Docker CLI's current context. */
+  context: string
+  contextUsesPipe: boolean
+  binOnPath: boolean
+}
+
+export type ToolInstallEvent =
+  | { type: 'step'; step: 'cli' | 'compose' | 'buildx' | 'path'; status: 'working' | 'done' | 'failed'; detail?: string }
+  | { type: 'done' }
+  | { type: 'error'; message: string }
 
 // ---- moving from Docker Desktop (Windows) ----------------------------------------
 

@@ -19,6 +19,7 @@ export const defaultSettings: Settings = {
   exec_default_shell: '/bin/sh',
   log_tail_lines: 1000,
   tray_enabled: true,
+  share_docker_pipe: true,
 }
 
 const now = () => new Date().toISOString()

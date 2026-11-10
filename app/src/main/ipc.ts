@@ -4,6 +4,8 @@ import { ApiError } from '../renderer/src/api/types'
 import type { Store } from './db'
 import { toApiError, type Engine } from './engine/engine'
 import * as migrate from './migrate/migrate'
+import * as tools from './tools/windows-tools'
+import type { PipeShare } from './tools/windows-tools'
 import { repairSocket } from './engine/wsl'
 
 // The IPC surface from architecture.md ("API"). Three channels:
@@ -27,6 +29,7 @@ const settingValue = {
   exec_default_shell: z.enum(['/bin/sh', '/bin/bash', 'cmd.exe']),
   log_tail_lines: z.number().int().min(50).max(5000),
   tray_enabled: z.boolean(),
+  share_docker_pipe: z.boolean(),
 } as const
 
 export interface IpcDeps {
@@ -35,6 +38,7 @@ export interface IpcDeps {
   /** Window and OS side effects that live in index.ts. */
   onSettingChanged: (key: string, value: unknown) => void
   isTrustedSender: (e: IpcMainInvokeEvent) => boolean
+  share: PipeShare
 }
 
 type Route = { args: z.ZodType; run: (args: any) => unknown }
@@ -48,6 +52,8 @@ export function registerIpc(deps: IpcDeps) {
     'engine.reconnect': { args: z.tuple([]), run: () => engine.reconnect() },
     'engine.repairWsl': { args: z.tuple([distro]), run: ([d]) => engine.repairWsl(d) },
 
+    'tools.status': { args: z.tuple([]), run: () => tools.status(deps.share) },
+    'tools.useDefaultContext': { args: z.tuple([]), run: () => tools.useDefaultContext() },
     'migrate.check': { args: z.tuple([]), run: () => migrate.check() },
     'migrate.plan': { args: z.tuple([distro]), run: ([d]) => migrate.plan(d) },
     'migrate.repairSocket': { args: z.tuple([distro]), run: ([d]) => repairSocket(d) },
@@ -147,6 +153,7 @@ export function registerIpc(deps: IpcDeps) {
     logs: z.tuple([id, z.number().int().min(0).max(5000)]),
     stats: z.tuple([z.array(id).max(500)]),
     exec: z.tuple([id, z.enum(['/bin/sh', '/bin/bash', 'cmd.exe']), z.number().int().min(10).max(1000), z.number().int().min(4).max(500)]),
+    installCli: z.tuple([]),
     migrate: z.tuple([distro, z.array(z.string().max(300)).max(2000), z.object({ start: z.boolean() })]),
     pull: z.tuple([z.string().regex(/^[a-z0-9][a-z0-9._\/:@-]{0,255}$/i, 'That isn’t a valid image reference.')]),
   }
@@ -211,6 +218,15 @@ export function registerIpc(deps: IpcDeps) {
             pulls.delete(subId)
             subs.delete(subId)
           })
+          break
+        }
+        case 'installCli': {
+          let live = true
+          stop = () => (live = false)
+          tools.installCli((s) => live && to({ type: 'step', ...s })).then(
+            () => live && to({ type: 'done' }),
+            (err) => live && to({ type: 'error', message: toApiError(err).message }),
+          )
           break
         }
         case 'migrate':

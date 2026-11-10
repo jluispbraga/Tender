@@ -52,6 +52,11 @@ const quiet = (s: { ready: Promise<void>; stop: () => void }) => {
 const tender: TenderApi = {
   kind: 'ipc',
   platform: process.platform,
+  tools: {
+    status: () => call('tools.status'),
+    installCli: (onStep) => quiet(subscribe('installCli', [], onStep)),
+    useDefaultContext: () => call('tools.useDefaultContext'),
+  },
   migrate: {
     check: () => call('migrate.check'),
     plan: (distro) => call('migrate.plan', distro),

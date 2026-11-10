@@ -30,3 +30,21 @@ test.describe('F13 move from Docker Desktop', () => {
     await expect(page.getByRole('heading', { name: 'Move from Docker Desktop' })).toBeVisible()
   })
 })
+
+test.describe('F14 Docker tools on Windows', () => {
+  test('F14-H1 the pipe is shared, the CLI installs, the stale context can be switched', async ({ page, open, scan }) => {
+    await open('#/settings')
+    await expect(page.getByRole('switch', { name: 'Let Docker tools on Windows use this engine' })).toBeChecked()
+    await expect(page.getByText('Serving //./pipe/docker_engine from Docker in Ubuntu', { exact: false })).toBeVisible()
+    await expect(page.getByText('docker.exe not found')).toBeVisible()
+    await scan('S21 settings, Docker on Windows')
+    await page.getByRole('button', { name: 'Install the Docker CLI' }).click()
+    const progress = page.getByRole('list', { name: 'Install progress' })
+    await expect(progress).toContainText('Add to your PATH')
+    await expect(page.getByText('Open a new terminal to use docker.')).toBeVisible()
+    await expect(page.getByText(/docker 29\.4\.3, installed by Tender/)).toBeVisible()
+    await expect(page.getByText('The Docker CLI uses the context “desktop-linux”', { exact: false })).toBeVisible()
+    await page.getByRole('button', { name: 'Switch to the default context' }).click()
+    await expect(page.getByText('The Docker CLI uses the context', { exact: false })).toHaveCount(0)
+  })
+})

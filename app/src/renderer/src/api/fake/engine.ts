@@ -18,6 +18,7 @@ import {
   type Settings,
   type StatsSample,
   type VolumeRow,
+  type WindowsTools,
 } from '../types'
 import { bootLines, chatter, flavour, seedContainers, seedImages, seedLayers, seedVolumes } from './seed'
 import { createFakeShell } from './shell'
@@ -52,6 +53,7 @@ export function createFakeApi(): TenderApi {
     exec_default_shell: '/bin/sh',
     log_tail_lines: 1000,
     tray_enabled: true,
+    share_docker_pipe: true,
   }
   const grid: Record<GridView, GridPrefs> = { containers: { hidden: ['created'] }, images: { hidden: [] }, volumes: { hidden: [] } }
   const notifications: Notification[] = [
@@ -236,6 +238,8 @@ export function createFakeApi(): TenderApi {
   const pulls = new Map<string, { cancel: () => void }>()
   const activePullByRef = new Map<string, string>()
 
+  let fakeTools: WindowsTools = { pipe: { state: 'serving', distro: 'Ubuntu' }, cli: null, compose: null, buildx: null, context: 'desktop-linux', contextUsesPipe: false, binOnPath: false }
+
   const fakeMigrationPlan: MigrationItem[] = [
     { id: 'project:shop', kind: 'project', label: 'shop', containers: ['shop-web-1', 'shop-db-1', 'shop-worker-1'], images: ['sha256:shopweb', 'sha256:postgres17', 'sha256:shopworker'], volumes: ['shop-data'], bytes: 912_000_000, running: 2, conflicts: [] },
     { id: 'project:analytics', kind: 'project', label: 'analytics', containers: ['clickhouse', 'grafana'], images: ['sha256:clickhouse', 'sha256:grafana'], volumes: ['analytics_ch-data'], bytes: 2_400_000_000, running: 0, conflicts: ['grafana'] },
@@ -245,6 +249,31 @@ export function createFakeApi(): TenderApi {
 
   const api: TenderApi = {
     kind: 'fake',
+    tools: {
+      async status() {
+        await sleep(200)
+        return { ...fakeTools }
+      },
+      installCli(onStep) {
+        const steps = ['cli', 'compose', 'buildx', 'path'] as const
+        let i = 0
+        const timer = setInterval(() => {
+          if (i < steps.length * 2) {
+            const step = steps[i >> 1]
+            onStep({ type: 'step', step, status: i % 2 ? 'done' : 'working', detail: i % 2 ? '29.4.3' : undefined })
+            i++
+            return
+          }
+          fakeTools = { ...fakeTools, cli: { path: 'C:\Users\you\AppData\Local\Tender\bin\docker.exe', version: '29.4.3', own: true }, compose: '5.1.3', buildx: 'v0.30.1', binOnPath: true }
+          onStep({ type: 'done' })
+          clearInterval(timer)
+        }, 80)
+        return () => clearInterval(timer)
+      },
+      async useDefaultContext() {
+        fakeTools = { ...fakeTools, context: 'default', contextUsesPipe: true }
+      },
+    },
     migrate: {
       async check() {
         await sleep(300)

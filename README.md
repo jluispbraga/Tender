@@ -163,6 +163,8 @@ There is no TCP port, no root and no change to the distribution. You do not need
 
 **Moving away from Docker Desktop?** Your existing containers, images and volumes live inside Docker Desktop's engine. Tender moves them to the engine inside WSL: the installer offers it when it finds Docker Desktop, and the **Move from Docker Desktop** page is always in Settings. [docs/migrate-from-docker-desktop.md](docs/migrate-from-docker-desktop.md) explains it, and also covers a command-line script.
 
+**Docker tools on Windows.** While Tender runs, it serves the standard pipe `//./pipe/docker_engine` from the engine inside WSL, unless Docker Desktop already serves it. With that pipe, `docker.exe`, the VS Code Docker extension, Testcontainers and JetBrains IDEs work without Docker Desktop. Settings › Docker on Windows can also install the official Docker CLI, Compose and Buildx for your user, with no admin rights; Compose and Buildx are checked against the SHA-256 that GitHub records for each release file. Keep Tender in the notification area and start it at sign-in, so the pipe is always there.
+
 If your user is not in the distribution's `docker` group, the connection error says so. Fix it with `sudo usermod -aG docker $USER` inside WSL, then `wsl --terminate <distro>` and start the distribution again.
 
 ### Environment variables

@@ -4,6 +4,7 @@ import { app, BrowserWindow, Menu, nativeImage, nativeTheme, session, Tray, type
 import { Store } from './db'
 import { Engine } from './engine/engine'
 import { registerIpc } from './ipc'
+import { PipeShare } from './tools/windows-tools'
 import trayIcon from '../../resources/tray.png?asset'
 import trayIcon2x from '../../resources/tray@2x.png?asset'
 import appIcon from '../../resources/icon.png?asset'
@@ -25,6 +26,8 @@ let quitting = false
 
 const store = new Store(process.env.TENDER_DB_PATH || join(app.getPath('userData'), 'tender.db'))
 const engine = new Engine()
+// Windows: //./pipe/docker_engine for docker.exe, IDEs and other tools, from the engine in WSL.
+const share = new PipeShare(engine)
 
 function trusted(e: IpcMainInvokeEvent) {
   const url = e.senderFrame?.url ?? ''
@@ -137,6 +140,7 @@ X-GNOME-Autostart-enabled=true
 function onSettingChanged(key: string, value: unknown) {
   if (key === 'start_on_login') applyLoginItem(value === true)
   if (key === 'tray_enabled') setupTray(value === true)
+  if (key === 'share_docker_pipe') void share.sync(value === true)
   if (key === 'theme') nativeTheme.themeSource = value as 'system' | 'light' | 'dark'
 }
 
@@ -160,8 +164,11 @@ app.whenReady().then(() => {
   const settings = store.settings()
   nativeTheme.themeSource = settings.theme
 
-  registerIpc({ engine, store, onSettingChanged, isTrustedSender: trusted })
-  engine.onStatus(() => tray?.setContextMenu(trayMenu()))
+  registerIpc({ engine, store, onSettingChanged, isTrustedSender: trusted, share })
+  engine.onStatus(() => {
+    tray?.setContextMenu(trayMenu())
+    void share.sync(store.settings().share_docker_pipe)
+  })
   engine.start()
 
   createWindow()
@@ -207,6 +214,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   quitting = true
+  share.close()
   engine.stop()
 })
 

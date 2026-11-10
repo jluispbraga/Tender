@@ -8,6 +8,7 @@ import { setSetting, useEngine, useSettings } from '@/lib/queries'
 import { href } from '@/lib/router'
 import { cn } from '@/lib/cn'
 import { api, type Settings } from '@/api'
+import { WindowsTools } from './WindowsTools'
 
 const sections = [
   { key: 'general', label: 'General' },
@@ -74,6 +75,11 @@ function GeneralSection() {
           />
         </Field>
       </Group>
+      {api.platform === 'win32' && (
+        <Group title="Docker on Windows">
+          <WindowsTools settings={s} save={save} />
+        </Group>
+      )}
       {api.platform === 'win32' && (
         <Group title="Docker Desktop">
           <p className="text-sm text-muted">
