@@ -70,3 +70,18 @@ test.describe('F15 set up Docker in WSL', () => {
     await expect(page.getByText('Docker Engine is already set up here.')).toBeVisible()
   })
 })
+
+test.describe('F16 checkup', () => {
+  test('F16-H1 problems show with their fix; fixing one checks again', async ({ page, open, scan }) => {
+    await open('#/containers')
+    await page.getByRole('link', { name: 'Troubleshoot' }).click()
+    const doctor = page.getByRole('region', { name: 'Checkup' })
+    await expect(doctor).toContainText('2 things need attention')
+    await expect(doctor).toContainText('Docker in Ubuntu lost its socket')
+    await scan('S23 checkup')
+    await doctor.getByRole('button', { name: 'Repair Docker in Ubuntu' }).click()
+    await expect(page.getByText('Docker in Ubuntu has its socket back.', { exact: true })).toBeVisible()
+    await expect(doctor).toContainText('Docker Engine runs in Ubuntu')
+    await expect(doctor).toContainText('1 thing needs attention')
+  })
+})

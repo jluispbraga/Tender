@@ -8,6 +8,7 @@ import { EnginePill } from '@/components/ui/shell'
 import { useToast } from '@/components/ui/toast'
 import { keys, useEngine } from '@/lib/queries'
 import { href } from '@/lib/router'
+import { Doctor } from './Doctor'
 
 /** S23: check the connection, reconnect, and copy what support would ask for. */
 export function TroubleshootPage() {
@@ -43,6 +44,7 @@ export function TroubleshootPage() {
       <PageHeader title="Troubleshoot" />
       <div className="min-h-0 flex-1 overflow-auto p-6">
         <div className="flex max-w-2xl flex-col gap-6">
+          {api.kind === 'ipc' || api.platform === 'win32' ? <Doctor /> : null}
           <Card title="Engine connection" action={<Button icon={<RotateCw />} loading={busy} onClick={() => void reconnect()}>Reconnect</Button>}>
             <EnginePill state={e?.state ?? 'starting'} detail={e?.endpoint} />
             {e?.error && <p className="rounded-md bg-danger-bg px-3 py-2 font-mono text-sm text-danger">{e.error}</p>}

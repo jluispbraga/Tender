@@ -6,6 +6,7 @@ import { toApiError, type Engine } from './engine/engine'
 import * as migrate from './migrate/migrate'
 import * as tools from './tools/windows-tools'
 import * as setup from './tools/wsl-setup'
+import * as doctor from './tools/doctor'
 import type { PipeShare } from './tools/windows-tools'
 import { repairSocket } from './engine/wsl'
 
@@ -53,6 +54,11 @@ export function registerIpc(deps: IpcDeps) {
     'engine.reconnect': { args: z.tuple([]), run: () => engine.reconnect() },
     'engine.repairWsl': { args: z.tuple([distro]), run: ([d]) => engine.repairWsl(d) },
 
+    'doctor.check': { args: z.tuple([]), run: () => doctor.check(engine, deps.share) },
+    'doctor.fix': {
+      args: z.tuple([z.enum(['wsl-update', 'start-distro', 'repair-socket', 'start-docker', 'docker-group', 'dns-tunneling', 'default-context']), distro.optional()]),
+      run: ([f, d]) => doctor.fix(engine, f, d),
+    },
     'setup.distros': { args: z.tuple([]), run: () => setup.listDistros() },
     'setup.inspect': { args: z.tuple([distro]), run: ([d]) => setup.detail(d) },
     'tools.status': { args: z.tuple([]), run: () => tools.status(deps.share) },

@@ -265,6 +265,11 @@ export interface TenderApi {
     recent(): Promise<RecentItem[]>
     recordUse(item: RecentItem): Promise<void>
   }
+  /** Everything Tender depends on, checked, each problem with its fix. */
+  doctor: {
+    check(): Promise<DoctorCheck[]>
+    fix(id: DoctorFix['id'], distro?: string): Promise<string>
+  }
   /** Windows: install Docker Engine inside a WSL distribution. */
   setup: {
     distros(): Promise<WslDistro[]>
@@ -285,6 +290,28 @@ export interface TenderApi {
     /** Gives the distribution's socket back to its own engine (restarts Docker there, as root through WSL). */
     repairSocket(distro: string): Promise<void>
   }
+}
+
+// ---- the Doctor ------------------------------------------------------------------
+
+export interface DoctorFix {
+  id: 'wsl-update' | 'start-distro' | 'repair-socket' | 'start-docker' | 'docker-group' | 'dns-tunneling' | 'default-context'
+  label: string
+  distro?: string
+  /** What the fix does that the user should know first. */
+  note?: string
+}
+
+export interface DoctorCheck {
+  id: string
+  area: 'wsl' | 'engine' | 'network' | 'windows'
+  title: string
+  status: 'ok' | 'warn' | 'fail' | 'info'
+  detail?: string
+  /** What to do by hand, when there is no button for it. */
+  hint?: string
+  fix?: DoctorFix
+  link?: { label: string; route: string }
 }
 
 // ---- Docker Engine inside WSL -----------------------------------------------------

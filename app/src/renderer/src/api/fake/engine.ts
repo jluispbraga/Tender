@@ -239,6 +239,7 @@ export function createFakeApi(): TenderApi {
   const pulls = new Map<string, { cancel: () => void }>()
   const activePullByRef = new Map<string, string>()
 
+  let fakeDoctorFixed = false
   let fakeTools: WindowsTools = { pipe: { state: 'serving', distro: 'Ubuntu' }, cli: null, compose: null, buildx: null, context: 'desktop-linux', contextUsesPipe: false, binOnPath: false }
 
   const fakeMigrationPlan: MigrationItem[] = [
@@ -250,6 +251,27 @@ export function createFakeApi(): TenderApi {
 
   const api: TenderApi = {
     kind: 'fake',
+    doctor: {
+      async check() {
+        await sleep(400)
+        return [
+          { id: 'wsl', area: 'wsl', title: 'WSL is up to date enough', status: 'ok', detail: 'WSL 2.6.3' },
+          { id: 'distro', area: 'wsl', title: 'Ubuntu is running', status: 'ok', detail: 'Ubuntu 24.04.1 LTS' },
+          { id: 'systemd', area: 'wsl', title: 'systemd runs in Ubuntu', status: 'ok' },
+          fakeDoctorFixed
+            ? { id: 'engine', area: 'engine', title: 'Docker Engine runs in Ubuntu', status: 'ok', detail: 'Docker 29.4.3' }
+            : { id: 'engine', area: 'engine', title: 'Docker in Ubuntu lost its socket', status: 'fail', detail: 'Docker Desktop removes /var/run/docker.sock when it quits.', fix: { id: 'repair-socket', label: 'Repair Docker in Ubuntu', distro: 'Ubuntu', note: 'Restarts Docker there.' } },
+          { id: 'dns', area: 'network', title: 'Ubuntu cannot resolve Docker Hub', status: 'fail', detail: 'Pulls will fail.', fix: { id: 'dns-tunneling', label: 'Turn on DNS tunneling' } },
+          { id: 'pipe', area: 'windows', title: 'Windows tools can reach the engine', status: 'ok', detail: '//./pipe/docker_engine → Ubuntu' },
+          { id: 'cli', area: 'windows', title: 'No Docker CLI on Windows', status: 'info', link: { label: 'Install it', route: 'settings' } },
+        ]
+      },
+      async fix(id) {
+        await sleep(300)
+        if (id === 'repair-socket') fakeDoctorFixed = true
+        return id === 'repair-socket' ? 'Docker in Ubuntu has its socket back.' : 'Done.'
+      },
+    },
     setup: {
       async distros() {
         await sleep(150)
