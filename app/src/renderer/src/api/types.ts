@@ -265,6 +265,13 @@ export interface TenderApi {
     recent(): Promise<RecentItem[]>
     recordUse(item: RecentItem): Promise<void>
   }
+  /** A read-only view of the Kubernetes clusters in the user's kubeconfig. */
+  kube: {
+    contexts(): Promise<KubeContext[]>
+    namespaces(context: string): Promise<string[]>
+    overview(context: string, namespace: string): Promise<KubeOverview>
+    logs(context: string, namespace: string, pod: string, container: string, onEvent: (e: { type: 'lines'; lines: string[] } | { type: 'error'; message: string }) => void): Unsub
+  }
   /** Windows: WSL's memory and disks, and the settings that keep them in check. */
   resources: {
     status(): Promise<WslResources>
@@ -295,6 +302,22 @@ export interface TenderApi {
     /** Gives the distribution's socket back to its own engine (restarts Docker there, as root through WSL). */
     repairSocket(distro: string): Promise<void>
   }
+}
+
+// ---- Kubernetes (read-only) -------------------------------------------------------
+
+export interface KubeContext {
+  name: string
+  cluster: string
+  server: string
+  namespace: string
+  current: boolean
+}
+
+export interface KubeOverview {
+  pods: { name: string; namespace: string; status: string; ready: string; restarts: number; node?: string; containers: string[]; createdAt?: string }[]
+  deployments: { name: string; namespace: string; ready: string; upToDate: number; images: string[]; createdAt?: string }[]
+  services: { name: string; namespace: string; type: string; clusterIP: string; ports: string[] }[]
 }
 
 // ---- WSL memory and disk -----------------------------------------------------------

@@ -16,6 +16,7 @@ import { useSyncExternalStore } from 'react'
 //   #/migrate                          move from Docker Desktop (Windows)
 //   #/setup                            install Docker Engine in WSL (Windows)
 //   #/resources                        WSL memory and disk (Windows)
+//   #/kubernetes                       read-only view of kubeconfig clusters
 //   #/design                           design-system gallery
 
 const subscribe = (cb: () => void) => {

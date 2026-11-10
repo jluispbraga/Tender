@@ -52,6 +52,12 @@ const quiet = (s: { ready: Promise<void>; stop: () => void }) => {
 const tender: TenderApi = {
   kind: 'ipc',
   platform: process.platform,
+  kube: {
+    contexts: () => call('kube.contexts'),
+    namespaces: (c) => call('kube.namespaces', c),
+    overview: (c, n) => call('kube.overview', c, n),
+    logs: (c, n, p, k, onEvent) => quiet(subscribe('kubeLogs', [c, n, p, k], onEvent)),
+  },
   resources: {
     status: () => call('resources.status'),
     act: (a) => call('resources.act', a),

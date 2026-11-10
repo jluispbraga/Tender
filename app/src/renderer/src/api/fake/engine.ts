@@ -259,6 +259,43 @@ export function createFakeApi(): TenderApi {
 
   const api: TenderApi = {
     kind: 'fake',
+    kube: {
+      async contexts() {
+        await sleep(100)
+        return [
+          { name: 'kind-dev', cluster: 'kind-dev', server: 'https://127.0.0.1:6443', namespace: 'default', current: true },
+          { name: 'minikube', cluster: 'minikube', server: 'https://127.0.0.1:57796', namespace: 'default', current: false },
+        ]
+      },
+      async namespaces(c) {
+        await sleep(150)
+        if (c === 'minikube') throw new ApiError('minikube did not answer within 6 s. Is the cluster running?')
+        return ['default', 'kube-system', 'shop']
+      },
+      async overview(c, ns) {
+        await sleep(200)
+        if (c === 'minikube') throw new ApiError('minikube did not answer within 6 s. Is the cluster running?')
+        const pods = [
+          { name: 'web-7d9f8b6c5-x2k4p', namespace: 'shop', status: 'Running', ready: '1/1', restarts: 0, node: 'kind-dev-control-plane', containers: ['web'], createdAt: new Date(Date.now() - 3 * 3600_000).toISOString() },
+          { name: 'worker-5c6d7f8-abcde', namespace: 'shop', status: 'CrashLoopBackOff', ready: '0/1', restarts: 7, node: 'kind-dev-control-plane', containers: ['worker'], createdAt: new Date(Date.now() - 3 * 3600_000).toISOString() },
+          { name: 'coredns-5d78c9869d-q8rlz', namespace: 'kube-system', status: 'Running', ready: '1/1', restarts: 0, node: 'kind-dev-control-plane', containers: ['coredns'], createdAt: new Date(Date.now() - 86400_000).toISOString() },
+        ]
+        const keep = <T extends { namespace: string }>(xs: T[]) => (ns === '*' ? xs : xs.filter((x) => x.namespace === ns))
+        return {
+          pods: keep(pods),
+          deployments: keep([
+            { name: 'web', namespace: 'shop', ready: '1/1', upToDate: 1, images: ['shop/web:1.4.2'] },
+            { name: 'worker', namespace: 'shop', ready: '0/1', upToDate: 1, images: ['shop/worker:dev'] },
+          ]),
+          services: keep([{ name: 'web', namespace: 'shop', type: 'NodePort', clusterIP: '10.96.12.40', ports: ['80:30080/TCP'] }]),
+        }
+      },
+      logs(_c, _n, pod, _k, onEvent) {
+        let i = 0
+        const timer = setInterval(() => onEvent({ type: 'lines', lines: [`${pod} line ${++i}`] }), 150)
+        return () => clearInterval(timer)
+      },
+    },
     resources: {
       async status() {
         await sleep(200)

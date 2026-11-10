@@ -105,3 +105,29 @@ test.describe('F17 WSL memory and disk', () => {
     await expect(page.getByRole('button', { name: 'Clear unused build cache' })).toBeDisabled()
   })
 })
+
+test.describe('F18 Kubernetes (read-only)', () => {
+  test('F18-H1 pods, deployments, services, and a pod log', async ({ page, open, scan }) => {
+    await open('#/containers')
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /Kubernetes/ }).click()
+    const pods = page.getByRole('table', { name: 'Pods' })
+    await expect(pods).toContainText('worker-5c6d7f8-abcde')
+    await expect(pods).toContainText('CrashLoopBackOff')
+    await expect(page.getByText('Read-only: Tender lists and shows logs', { exact: false })).toBeVisible()
+    await scan('S29 kubernetes')
+    await page.getByRole('button', { name: 'Logs of web-7d9f8b6c5-x2k4p' }).click()
+    await expect(page.getByLabel('Log lines')).toContainText('web-7d9f8b6c5-x2k4p line 2')
+    await page.getByRole('tab', { name: /deployments/i }).click()
+    await expect(page.getByRole('table', { name: 'Deployments' })).toContainText('shop/web:1.4.2')
+    await page.getByRole('tab', { name: /services/i }).click()
+    await expect(page.getByRole('table', { name: 'Services' })).toContainText('80:30080/TCP')
+  })
+
+  test('F18-E1 a cluster that is not running says so', async ({ page, open }) => {
+    await open('#/containers')
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /Kubernetes/ }).click()
+    await page.getByRole('combobox', { name: 'Context' }).click()
+    await page.getByRole('option', { name: 'minikube' }).click()
+    await expect(page.getByText('minikube did not answer within 6 s. Is the cluster running?')).toBeVisible()
+  })
+})
