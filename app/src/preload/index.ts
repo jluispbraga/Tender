@@ -52,8 +52,15 @@ const quiet = (s: { ready: Promise<void>; stop: () => void }) => {
 const tender: TenderApi = {
   kind: 'ipc',
   platform: process.platform,
+  updates: {
+    status: () => call('updates.status'),
+    check: () => call('updates.check'),
+    install: () => call('updates.install'),
+    openReleases: () => call('updates.openReleases'),
+  },
   kube: {
     contexts: () => call('kube.contexts'),
+    configProblem: () => call('kube.configProblem'),
     namespaces: (c) => call('kube.namespaces', c),
     overview: (c, n) => call('kube.overview', c, n),
     logs: (c, n, p, k, onEvent) => quiet(subscribe('kubeLogs', [c, n, p, k], onEvent)),
@@ -86,6 +93,7 @@ const tender: TenderApi = {
     status: () => call('engine.status'),
     reconnect: () => call('engine.reconnect'),
     repairWsl: (distro) => call('engine.repairWsl', distro),
+    restartWsl: () => call('engine.restartWsl'),
     onStatus: (cb) => quiet(subscribe('status', [], cb)),
     onEvents: (cb) => quiet(subscribe('events', [], cb)),
   },

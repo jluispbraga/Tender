@@ -71,13 +71,29 @@ export async function listDistros(): Promise<WslDistro[]> {
     .map((m) => ({ name: m[2], isDefault: !!m[1], running: m[3].toLowerCase() === 'running', version: Number(m[4]) }))
 }
 
-export type Probe = { ok: true; distro: string; version: string } | { ok: false; distro: string; reason: string; lostSocket?: boolean }
+export type Probe = { ok: true; distro: string; version: string } | { ok: false; distro: string; reason: string; lostSocket?: boolean; wslStuck?: boolean }
+
+/**
+ * WSL's own service is wedged: every command in every distribution fails with
+ * "Catastrophic failure, Wsl/Service/E_UNEXPECTED" (often after sleep or a long
+ * uptime), although `wsl --list` still works. Only `wsl --shutdown` clears it.
+ */
+export function wslStuck(r: Run): boolean {
+  return /E_UNEXPECTED/i.test(decode(r.stdout) + decode(r.stderr))
+}
+
+/** Restarts WSL: stops every distribution and the VM, which clears a wedged WSL service. */
+export async function restartWsl(): Promise<void> {
+  const r = await run(['--shutdown'], 60_000)
+  if (r.code !== 0) throw new Error(`wsl --shutdown failed: ${decode(r.stdout).trim() || decode(r.stderr).trim() || `exit code ${r.code}`}`)
+}
 
 /** Asks the distribution's own Docker CLI whether its engine answers. */
 export async function probe(distro: string, timeout = 10_000): Promise<Probe> {
   const r = await run(['--distribution', distro, '--exec', 'docker', 'version', '--format', '{{.Server.Version}}'], timeout)
   const version = decode(r.stdout).trim()
   if (r.code === 0 && version) return { ok: true, distro, version }
+  if (wslStuck(r)) return { ok: false, distro, reason: 'WSL itself is not responding (Wsl/Service/E_UNEXPECTED)', wslStuck: true }
   const err = decode(r.stderr).trim()
   if (/cannot connect|is the docker daemon running/i.test(err) && (await socketLost(distro))) {
     return { ok: false, distro, reason: 'its engine is running but lost its socket (Docker Desktop removes /var/run/docker.sock when it quits)', lostSocket: true }
@@ -97,13 +113,15 @@ export async function probe(distro: string, timeout = 10_000): Promise<Probe> {
  * stopped ones named in `boot` (that are installed, WSL 2) and asks them: running
  * a command in a stopped distribution starts it, and systemd starts Docker.
  */
-export async function findWslEngine(boot: string[] = []): Promise<{ found: Probe & { ok: true }; booted?: boolean } | { found: null; why: string; lost?: string }> {
+export async function findWslEngine(boot: string[] = []): Promise<{ found: Probe & { ok: true }; booted?: boolean } | { found: null; why: string; lost?: string; stuck?: boolean }> {
   const distros = await runningDistros()
   const misses: string[] = []
   let lost: string | undefined
   for (const d of distros) {
     const p = await probe(d)
     if (p.ok) return { found: p }
+    // WSL is wedged: no distribution will answer, and booting one would fail the same way.
+    if (p.wslStuck) return { found: null, why: p.reason, stuck: true }
     if (p.lostSocket) lost ??= d
     misses.push(`${d}: ${p.reason}`)
   }
@@ -113,6 +131,7 @@ export async function findWslEngine(boot: string[] = []): Promise<{ found: Probe
     // A cold start after Windows boots can take a while: the VM, then systemd, then Docker.
     const p = await probe(d, 60_000)
     if (p.ok) return { found: p, booted: true }
+    if (p.wslStuck) return { found: null, why: p.reason, stuck: true }
     misses.push(`${d} (started it): ${p.reason}`)
   }
   return { found: null, why: misses.join('; ') || 'no WSL distribution is running', lost }

@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import type { DoctorCheck, DoctorFix } from '../../renderer/src/api/types'
 import type { Engine } from '../engine/engine'
-import { decode, engineOs, probe, repairSocket, run as wsl, runningDistros } from '../engine/wsl'
+import { decode, engineOs, probe, repairSocket, run as wsl, runningDistros, wslStuck } from '../engine/wsl'
 import * as tools from './windows-tools'
 import { inspect, listDistros } from './wsl-setup'
 import { readWslconfig, setWslconfig, wslconfigPath } from './wslconfig'
@@ -57,7 +57,18 @@ export async function check(engine: Engine, share: tools.PipeShare): Promise<Doc
   )
 
   const distro = await targetDistro(engine)
-  if (!distro) {
+  // WSL's service can wedge (after sleep, or a long uptime): --list still works, every command fails.
+  const alive = distro ? await wsl(['--distribution', distro, '--exec', 'true'], 20_000) : null
+  if (status.wslStuck || (alive && wslStuck(alive))) {
+    out.push({
+      id: 'wsl-stuck',
+      area: 'wsl',
+      title: 'WSL is not responding',
+      status: 'fail',
+      detail: 'Every command in Linux fails with “Catastrophic failure” (Wsl/Service/E_UNEXPECTED).',
+      fix: { id: 'restart-wsl', label: 'Restart WSL', note: 'Runs wsl --shutdown: every distribution stops for a moment; Tender then starts the one with Docker again.' },
+    })
+  } else if (!distro) {
     const all = await listDistros()
     const def = all.find((d) => d.isDefault) ?? all[0]
     out.push(
@@ -138,6 +149,9 @@ export async function fix(engine: Engine, f: DoctorFix['id'], distro?: string): 
       if (r.code !== 0) throw new Error(`wsl --update failed: ${r.out.trim()}`)
       return 'WSL updated.'
     }
+    case 'restart-wsl':
+      await engine.restartWsl()
+      return 'WSL restarted.'
     case 'start-distro':
       await wsl(['--distribution', distro!, '--exec', 'true'], 60_000)
       await engine.reconnect()

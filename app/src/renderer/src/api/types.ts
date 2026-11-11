@@ -17,6 +17,8 @@ export interface EngineStatus {
   error?: string
   /** Windows: this WSL distribution's engine runs but lost its socket; it can be repaired. */
   repair?: string
+  /** Windows: WSL's own service is wedged (Wsl/Service/E_UNEXPECTED); restarting WSL clears it. */
+  wslStuck?: boolean
 }
 
 export type ContainerState = 'created' | 'running' | 'paused' | 'restarting' | 'exited' | 'dead'
@@ -182,6 +184,27 @@ export interface Settings {
   tray_enabled: boolean
   /** Windows: serve //./pipe/docker_engine from the engine in WSL, for docker.exe, IDEs and other tools. */
   share_docker_pipe: boolean
+  /** Look for new versions on GitHub and download them in the background. */
+  check_updates: boolean
+}
+
+export interface KubeConfigProblem {
+  path: string
+  problem: string
+  hint: string
+}
+
+export interface UpdateStatus {
+  /** The Windows installer and the AppImage update themselves; the portable .exe and the .deb do not. */
+  supported: boolean
+  current: string
+  state: 'idle' | 'off' | 'checking' | 'none' | 'downloading' | 'ready' | 'error'
+  /** The new version, while downloading or once ready. */
+  version?: string
+  percent?: number
+  error?: string
+  checkedAt?: string
+  releases: string
 }
 
 export type GridView = 'containers' | 'images' | 'volumes'
@@ -208,6 +231,8 @@ export interface TenderApi {
     reconnect(): Promise<EngineStatus>
     /** Windows: restart Docker in a WSL distribution whose engine lost its socket, then reconnect. */
     repairWsl(distro: string): Promise<EngineStatus>
+    /** Windows: wsl --shutdown, then reconnect (Tender boots the distribution with Docker again). */
+    restartWsl(): Promise<EngineStatus>
     onStatus(cb: (s: EngineStatus) => void): Unsub
     onEvents(cb: (events: EngineEvent[]) => void): Unsub
   }
@@ -265,9 +290,20 @@ export interface TenderApi {
     recent(): Promise<RecentItem[]>
     recordUse(item: RecentItem): Promise<void>
   }
+  /** New versions from GitHub Releases. */
+  updates: {
+    status(): Promise<UpdateStatus>
+    check(): Promise<UpdateStatus>
+    /** Quits Tender and runs the downloaded update, which opens Tender again. */
+    install(): Promise<void>
+    /** Opens the GitHub Releases page in the browser. */
+    openReleases(): Promise<void>
+  }
   /** A read-only view of the Kubernetes clusters in the user's kubeconfig. */
   kube: {
     contexts(): Promise<KubeContext[]>
+    /** When there are no contexts: whether the kubeconfig is broken, and how to fix it. */
+    configProblem(): Promise<KubeConfigProblem | null>
     namespaces(context: string): Promise<string[]>
     overview(context: string, namespace: string): Promise<KubeOverview>
     logs(context: string, namespace: string, pod: string, container: string, onEvent: (e: { type: 'lines'; lines: string[] } | { type: 'error'; message: string }) => void): Unsub
@@ -348,7 +384,7 @@ export type ResourceAction =
 // ---- the Doctor ------------------------------------------------------------------
 
 export interface DoctorFix {
-  id: 'wsl-update' | 'start-distro' | 'repair-socket' | 'start-docker' | 'docker-group' | 'dns-tunneling' | 'default-context'
+  id: 'wsl-update' | 'restart-wsl' | 'start-distro' | 'repair-socket' | 'start-docker' | 'docker-group' | 'dns-tunneling' | 'default-context'
   label: string
   distro?: string
   /** What the fix does that the user should know first. */

@@ -9,6 +9,7 @@ import * as setup from './tools/wsl-setup'
 import * as doctor from './tools/doctor'
 import * as resources from './tools/resources'
 import * as kube from './k8s/kube'
+import * as updates from './updates'
 import type { PipeShare } from './tools/windows-tools'
 import { repairSocket } from './engine/wsl'
 
@@ -36,6 +37,7 @@ const settingValue = {
   log_tail_lines: z.number().int().min(50).max(5000),
   tray_enabled: z.boolean(),
   share_docker_pipe: z.boolean(),
+  check_updates: z.boolean(),
 } as const
 
 export interface IpcDeps {
@@ -45,6 +47,8 @@ export interface IpcDeps {
   onSettingChanged: (key: string, value: unknown) => void
   isTrustedSender: (e: IpcMainInvokeEvent) => boolean
   share: PipeShare
+  /** Lets the window close for good before the update installer runs. */
+  beforeUpdateQuit: () => void
 }
 
 type Route = { args: z.ZodType; run: (args: any) => unknown }
@@ -57,8 +61,14 @@ export function registerIpc(deps: IpcDeps) {
     'engine.status': { args: z.tuple([]), run: () => ({ ...engine.getStatus() }) },
     'engine.reconnect': { args: z.tuple([]), run: () => engine.reconnect() },
     'engine.repairWsl': { args: z.tuple([distro]), run: ([d]) => engine.repairWsl(d) },
+    'engine.restartWsl': { args: z.tuple([]), run: () => engine.restartWsl() },
 
+    'updates.status': { args: z.tuple([]), run: () => updates.updateStatus() },
+    'updates.check': { args: z.tuple([]), run: () => updates.check() },
+    'updates.install': { args: z.tuple([]), run: () => updates.installNow(deps.beforeUpdateQuit) },
+    'updates.openReleases': { args: z.tuple([]), run: () => shell.openExternal(updates.updateStatus().releases) },
     'kube.contexts': { args: z.tuple([]), run: () => kube.contexts() },
+    'kube.configProblem': { args: z.tuple([]), run: () => kube.configProblem() },
     'kube.namespaces': { args: z.tuple([kubeName]), run: ([c]) => kube.namespaces(c) },
     'kube.overview': { args: z.tuple([kubeName, kubeName]), run: ([c, n]) => kube.overview(c, n) },
     'resources.status': { args: z.tuple([]), run: () => resources.status(engine) },
@@ -77,7 +87,7 @@ export function registerIpc(deps: IpcDeps) {
     },
     'doctor.check': { args: z.tuple([]), run: () => doctor.check(engine, deps.share) },
     'doctor.fix': {
-      args: z.tuple([z.enum(['wsl-update', 'start-distro', 'repair-socket', 'start-docker', 'docker-group', 'dns-tunneling', 'default-context']), distro.optional()]),
+      args: z.tuple([z.enum(['wsl-update', 'restart-wsl', 'start-distro', 'repair-socket', 'start-docker', 'docker-group', 'dns-tunneling', 'default-context']), distro.optional()]),
       run: ([f, d]) => doctor.fix(engine, f, d),
     },
     'setup.distros': { args: z.tuple([]), run: () => setup.listDistros() },

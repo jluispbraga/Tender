@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Bell, Box, Database, Gauge, Layers, LifeBuoy, Search, Settings as SettingsIcon, Ship } from 'lucide-react'
+import { Bell, Box, Download, Database, Gauge, Layers, LifeBuoy, Search, Settings as SettingsIcon, Ship } from 'lucide-react'
 import { CommandPalette } from '@/components/ui/command-palette'
 import { EnginePill, ResourceMeter, SidebarNav } from '@/components/ui/shell'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -18,6 +18,7 @@ export function AppShell({ section, children }: { section: string; children: Rea
   const volumes = useVolumes()
   const notifications = useNotifications()
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const update = useQuery({ queryKey: ['updates'], queryFn: () => api.updates.status(), refetchInterval: 5 * 60_000 })
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -64,6 +65,12 @@ export function AppShell({ section, children }: { section: string; children: Rea
           <kbd className="rounded-sm border border-line px-1.5 font-sans text-xs">Ctrl K</kbd>
         </button>
         <div className="flex-1" />
+        {update.data?.state === 'ready' && (
+          <button type="button" onClick={() => void api.updates.install()} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-accent px-3 text-base font-medium text-on-accent hover:opacity-90">
+            <Download aria-hidden className="size-4" />
+            Restart to update to {update.data.version}
+          </button>
+        )}
         <Tooltip content="Notifications">
           <a href={href('notifications')} aria-label={unread ? `Notifications, ${unread} unread` : 'Notifications'} className={headerIcon(section === 'notifications')}>
             <Bell aria-hidden className="size-4" />

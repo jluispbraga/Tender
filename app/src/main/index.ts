@@ -5,6 +5,7 @@ import { Store } from './db'
 import { Engine } from './engine/engine'
 import { registerIpc } from './ipc'
 import { PipeShare } from './tools/windows-tools'
+import { startUpdates } from './updates'
 import trayIcon from '../../resources/tray.png?asset'
 import trayIcon2x from '../../resources/tray@2x.png?asset'
 import appIcon from '../../resources/icon.png?asset'
@@ -141,6 +142,7 @@ function onSettingChanged(key: string, value: unknown) {
   if (key === 'start_on_login') applyLoginItem(value === true)
   if (key === 'tray_enabled') setupTray(value === true)
   if (key === 'share_docker_pipe') void share.sync(value === true)
+  if (key === 'check_updates') startUpdates(value === true)
   if (key === 'theme') nativeTheme.themeSource = value as 'system' | 'light' | 'dark'
 }
 
@@ -164,7 +166,8 @@ app.whenReady().then(() => {
   const settings = store.settings()
   nativeTheme.themeSource = settings.theme
 
-  registerIpc({ engine, store, onSettingChanged, isTrustedSender: trusted, share })
+  registerIpc({ engine, store, onSettingChanged, isTrustedSender: trusted, share, beforeUpdateQuit: () => (quitting = true) })
+  startUpdates(settings.check_updates)
   engine.onStatus(() => {
     tray?.setContextMenu(trayMenu())
     void share.sync(store.settings().share_docker_pipe)

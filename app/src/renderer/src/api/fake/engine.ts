@@ -21,6 +21,7 @@ import {
   type WindowsTools,
   type WslSetupEvent,
   type WslResources,
+  type UpdateStatus,
 } from '../types'
 import { bootLines, chatter, flavour, seedContainers, seedImages, seedLayers, seedVolumes } from './seed'
 import { createFakeShell } from './shell'
@@ -56,6 +57,7 @@ export function createFakeApi(): TenderApi {
     log_tail_lines: 1000,
     tray_enabled: true,
     share_docker_pipe: true,
+    check_updates: true,
   }
   const grid: Record<GridView, GridPrefs> = { containers: { hidden: ['created'] }, images: { hidden: [] }, volumes: { hidden: [] } }
   const notifications: Notification[] = [
@@ -241,6 +243,8 @@ export function createFakeApi(): TenderApi {
   const activePullByRef = new Map<string, string>()
 
   let fakeDoctorFixed = false
+  let fakeKubeBroken = false
+  let fakeUpdate: UpdateStatus = { supported: true, current: '0.4.0', state: 'none', releases: 'https://github.com/jluispbraga/Tender/releases' }
   const fakeResources: WslResources = {
     memory: { vmBytes: 3_050_000_000, hostBytes: 16_600_000_000, limit: null, reclaim: 'disabled' },
     disks: [{ distro: 'Ubuntu', path: 'C:\Users\you\AppData\Local\Packages\Ubuntu\LocalState\ext4.vhdx', fileBytes: 59_000_000_000, usedBytes: 41_000_000_000, sparse: false, running: true, version: 2 }],
@@ -259,9 +263,33 @@ export function createFakeApi(): TenderApi {
 
   const api: TenderApi = {
     kind: 'fake',
+    updates: {
+      async status() {
+        return { ...fakeUpdate }
+      },
+      async check() {
+        if (fakeUpdate.state === 'ready') return { ...fakeUpdate }
+        fakeUpdate = { ...fakeUpdate, state: 'checking' }
+        await sleep(300)
+        fakeUpdate = { ...fakeUpdate, state: 'ready', version: '0.4.1', percent: 100, checkedAt: new Date().toISOString() }
+        return { ...fakeUpdate }
+      },
+      async install() {
+        await sleep(100)
+        fakeUpdate = { ...fakeUpdate, state: 'none', current: fakeUpdate.version ?? fakeUpdate.current, version: undefined }
+      },
+      async openReleases() {},
+    },
     kube: {
+      async configProblem() {
+        await sleep(50)
+        return fakeKubeBroken
+          ? { path: 'C:\\Users\\dev\\.kube\\config', problem: 'Your kubeconfig lists the cluster minikube but no context to reach it, and its current context “minikube” does not exist. kubectl cannot use it either.', hint: 'Run minikube start: it starts the cluster and writes its context again.' }
+          : null
+      },
       async contexts() {
         await sleep(100)
+        if (fakeKubeBroken) return []
         return [
           { name: 'kind-dev', cluster: 'kind-dev', server: 'https://127.0.0.1:6443', namespace: 'default', current: true },
           { name: 'minikube', cluster: 'minikube', server: 'https://127.0.0.1:57796', namespace: 'default', current: false },
@@ -445,6 +473,12 @@ export function createFakeApi(): TenderApi {
       },
       async repairWsl() {
         setEngine({ state: 'starting', error: undefined, repair: undefined })
+        await sleep(800)
+        setEngine({ state: 'running' })
+        return engine
+      },
+      async restartWsl() {
+        setEngine({ state: 'starting', error: undefined, wslStuck: undefined })
         await sleep(800)
         setEngine({ state: 'running' })
         return engine
@@ -776,7 +810,8 @@ export function createFakeApi(): TenderApi {
 
   // Test hooks for engine states (S01). Only exist in the fake.
   ;(window as unknown as { __tenderFake: unknown }).__tenderFake = {
-    setEngine: (state: EngineStatus['state'], error?: string, repair?: string) => setEngine({ state, error, repair }),
+    setEngine: (state: EngineStatus['state'], error?: string, repair?: string, wslStuck?: boolean) => setEngine({ state, error, repair, wslStuck }),
+    setKubeBroken: (on: boolean) => (fakeKubeBroken = on),
   }
 
   return api

@@ -19,13 +19,17 @@ jobs:
         include:
           - os: windows-latest
             script: dist:win
+            # latest.yml and the blockmap are what installed copies read to update themselves.
             files: |
               app/release/*.exe
+              app/release/*.exe.blockmap
+              app/release/latest.yml
           - os: ubuntu-latest
             script: dist:linux
             files: |
               app/release/*.AppImage
               app/release/*.deb
+              app/release/latest-linux.yml
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -60,7 +64,7 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Checksums
-        run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+        run: cd dist && sha256sum *.exe *.AppImage *.deb > SHA256SUMS.txt && cat SHA256SUMS.txt
       - name: Draft release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import * as k8s from '@kubernetes/client-node'
-import type { KubeContext, KubeOverview } from '../../renderer/src/api/types'
+import type { KubeConfigProblem, KubeContext, KubeOverview } from '../../renderer/src/api/types'
 
 // A read-only view of the clusters in the user's kubeconfig (kind, k3d,
 // minikube, or anything else kubectl can reach). Tender lists and reads logs;
@@ -54,6 +54,38 @@ export function contexts(): KubeContext[] {
   }
   const current = kc.getCurrentContext()
   return kc.getContexts().map((c) => ({ name: c.name, cluster: c.cluster, server: kc.getCluster(c.cluster)?.server ?? '', namespace: c.namespace ?? 'default', current: c.name === current }))
+}
+
+/**
+ * Why the kubeconfig gives no usable context, when it has something to say: a file
+ * that does not parse, or clusters with no context pointing at them. The common case
+ * is minikube or kind after the cluster was deleted or the file was edited by hand.
+ */
+export function configProblem(): KubeConfigProblem | null {
+  const path = process.env.KUBECONFIG || join((process.platform === 'win32' && process.env.USERPROFILE) || homedir(), '.kube', 'config')
+  let kc: k8s.KubeConfig
+  try {
+    kc = load()
+  } catch (e) {
+    return { path, problem: `Your kubeconfig could not be read: ${reason(e)}`, hint: 'Fix or remove the file, then refresh.' }
+  }
+  if (kc.getContexts().length) return null
+  const clusters = kc.getClusters()
+  if (!clusters.length) return null
+  const current = kc.getCurrentContext()
+  const names = clusters.map((c) => c.name)
+  const user = kc.getUsers()[0]?.name
+  const first = names[0]
+  const hint = names.includes('minikube')
+    ? 'Run minikube start: it starts the cluster and writes its context again.'
+    : first.startsWith('kind-')
+      ? `Run kind export kubeconfig --name ${first.slice(5)} if that kind cluster still exists, or create it again with kind create cluster.`
+      : `Recreate the context with kubectl config set-context ${current || first} --cluster ${first}${user ? ` --user ${user}` : ''}, then kubectl config use-context ${current || first}.`
+  return {
+    path,
+    problem: `Your kubeconfig lists the cluster${names.length > 1 ? 's' : ''} ${names.join(', ')} but no context to reach ${names.length > 1 ? 'them' : 'it'}${current ? `, and its current context “${current}” does not exist` : ''}. kubectl cannot use it either.`,
+    hint,
+  }
 }
 
 export async function namespaces(context: string): Promise<string[]> {

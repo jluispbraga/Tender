@@ -24,7 +24,7 @@ import {
   type VolumeUsage,
 } from '../../renderer/src/api/types'
 import { dockerOptions, resolveEndpoint, WINDOWS_PIPE, type Endpoint } from './endpoint'
-import { findWslEngine, listDistros, pipeExists, repairSocket, WslBridge } from './wsl'
+import { findWslEngine, listDistros, pipeExists, repairSocket, restartWsl, WslBridge } from './wsl'
 
 // The WSL distribution whose engine answered last, so Tender can boot it after a restart.
 const wslMemo = () => join(app.getPath('userData'), 'wsl-engine')
@@ -96,6 +96,8 @@ export class Engine {
   private wslMiss: string | null = null
   /** A distribution whose engine runs but lost its socket: the gate offers to repair it. */
   private wslLost: string | null = null
+  /** WSL's own service is wedged (E_UNEXPECTED): the gate offers to restart WSL. */
+  private wslStuck = false
   private discovering: Promise<void> | null = null
   /** The pipe the WSL bridge stands in for: when it comes back (Docker Desktop started), switch back to it. */
   private bridged: string | null = null
@@ -170,10 +172,12 @@ export class Engine {
     if (!r.found) {
       this.wslMiss = r.why
       this.wslLost = r.lost ?? null
+      this.wslStuck = !!r.stuck
       return
     }
     this.wslMiss = null
     this.wslLost = null
+    this.wslStuck = false
     rememberWslDistro(r.found.distro)
     this.bridge = await WslBridge.open(r.found.distro)
     this.bridged = pipe
@@ -198,6 +202,15 @@ export class Engine {
   private lastBoot = 0
   private triedDefault = false
 
+  /** The user asked to restart a wedged WSL; the distribution with Docker is booted again right after. */
+  async restartWsl(): Promise<EngineStatus> {
+    this.closeBridge()
+    await restartWsl()
+    this.wslStuck = false
+    this.lastBoot = 0
+    return this.reconnect()
+  }
+
   /** The user asked to give a WSL distribution's engine its socket back (S01). */
   async repairWsl(distro: string): Promise<EngineStatus> {
     await repairSocket(distro)
@@ -218,7 +231,7 @@ export class Engine {
   }
 
   private setStatus(s: EngineStatus) {
-    const changed = s.state !== this.status.state || s.error !== this.status.error || s.repair !== this.status.repair
+    const changed = s.state !== this.status.state || s.error !== this.status.error || s.repair !== this.status.repair || s.wslStuck !== this.status.wslStuck
     this.status = s
     if (changed) this.statusListeners.forEach((fn) => fn(s))
   }
@@ -257,7 +270,7 @@ export class Engine {
       this.eventStream = null
       this.failures++
       const wsl = this.wslMiss ? `; also looked in WSL: ${this.wslMiss}` : ''
-      this.setStatus({ state: 'error', endpoint: this.endpoint.address, error: `${toApiError(e).message} (from ${this.endpoint.source}${wsl})`, ...(this.wslLost ? { repair: this.wslLost } : {}) })
+      this.setStatus({ state: 'error', endpoint: this.endpoint.address, error: `${toApiError(e).message} (from ${this.endpoint.source}${wsl})`, ...(this.wslLost ? { repair: this.wslLost } : {}), ...(this.wslStuck ? { wslStuck: true } : {}) })
       // The distribution went away: drop the bridge so the next try looks again from the start.
       if (this.bridge) {
         this.closeBridge()

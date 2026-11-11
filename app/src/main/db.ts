@@ -20,6 +20,7 @@ export const defaultSettings: Settings = {
   log_tail_lines: 1000,
   tray_enabled: true,
   share_docker_pipe: true,
+  check_updates: true,
 }
 
 const now = () => new Date().toISOString()

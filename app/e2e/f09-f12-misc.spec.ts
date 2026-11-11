@@ -34,6 +34,15 @@ test.describe('F10 engine not running', () => {
     await expect(page.getByRole('table', { name: 'Containers' })).toBeVisible({ timeout: 10_000 })
   })
 
+  test('F10-E4 WSL is stuck: one click restarts it', async ({ page, open, scan }) => {
+    await open('#/containers')
+    await setEngine(page, 'error', 'connect ENOENT //./pipe/docker_engine; also looked in WSL: WSL itself is not responding (Wsl/Service/E_UNEXPECTED)', undefined, true)
+    await expect(page.getByRole('heading', { name: 'WSL is not responding' })).toBeVisible()
+    await scan('S01 WSL stuck')
+    await page.getByRole('button', { name: 'Restart WSL' }).click()
+    await expect(page.getByRole('table', { name: 'Containers' })).toBeVisible({ timeout: 10_000 })
+  })
+
   test('F10-E2 settings stay usable while the engine is down', async ({ page, open, scan }) => {
     await open('#/containers')
     await setEngine(page, 'error', 'down')

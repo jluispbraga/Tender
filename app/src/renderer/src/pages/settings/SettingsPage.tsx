@@ -9,6 +9,7 @@ import { href } from '@/lib/router'
 import { cn } from '@/lib/cn'
 import { api, type Settings } from '@/api'
 import { WindowsTools } from './WindowsTools'
+import { Updates } from './Updates'
 
 const sections = [
   { key: 'general', label: 'General' },
@@ -94,6 +95,9 @@ function GeneralSection() {
         <Switch label="Start Tender when I sign in" checked={s.start_on_login} onCheckedChange={(v) => void save('start_on_login', v)} />
         <Switch label="Open the window when Tender starts" checked={s.open_on_start} onCheckedChange={(v) => void save('open_on_start', v)} />
         <Switch label={`Keep running in the ${api.platform === 'darwin' ? 'menu bar' : api.platform === 'win32' ? 'notification area' : 'system tray'} when the window is closed`} checked={s.tray_enabled} onCheckedChange={(v) => void save('tray_enabled', v)} />
+      </Group>
+      <Group title="Updates">
+        <Updates settings={s} save={save} />
       </Group>
       <Group title="Containers">
         <Field label="Default shell" description="Used when you open a terminal in a container. You can switch per session.">

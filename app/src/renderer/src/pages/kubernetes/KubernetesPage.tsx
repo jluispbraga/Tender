@@ -14,6 +14,7 @@ type Pod = KubeOverview['pods'][number]
 /** A read-only view of the clusters in the kubeconfig: pods, deployments, services, pod logs. */
 export function KubernetesPage() {
   const contexts = useQuery({ queryKey: ['kube', 'contexts'], queryFn: () => api.kube.contexts() })
+  const problem = useQuery({ queryKey: ['kube', 'problem'], queryFn: () => api.kube.configProblem(), enabled: contexts.data?.length === 0 })
   const [ctx, setCtx] = useState<string | null>(null)
   const [ns, setNs] = useState<string>('*')
   const [tab, setTab] = useState<'pods' | 'deployments' | 'services'>('pods')
@@ -24,10 +25,28 @@ export function KubernetesPage() {
   const overview = useQuery({ queryKey: ['kube', 'overview', context, ns], queryFn: () => api.kube.overview(context!, ns), enabled: !!context, refetchInterval: 5000, retry: false })
 
   if (contexts.data && !contexts.data.length) {
+    const p = problem.data
     return (
       <>
-        <PageHeader title="Kubernetes" />
-        <EmptyState icon={<Ship />} title="No Kubernetes clusters" body="Tender shows the clusters in your kubeconfig (~/.kube/config, or KUBECONFIG). Create one with kind, k3d or minikube and it appears here." />
+        <PageHeader title="Kubernetes">
+          <Button icon={<RotateCw />} loading={contexts.isFetching} onClick={() => (void contexts.refetch(), void problem.refetch())}>
+            Refresh
+          </Button>
+        </PageHeader>
+        {p ? (
+          <div className="p-6">
+            <section aria-labelledby="kube-problem" className="flex max-w-2xl flex-col gap-3 rounded-lg border border-line p-4">
+              <h2 id="kube-problem" className="text-md text-fg">
+                Your kubeconfig has no usable context
+              </h2>
+              <p className="text-sm text-fg">{p.problem}</p>
+              <p className="text-sm text-muted">{p.hint}</p>
+              <p className="text-xs break-all text-muted">{p.path}</p>
+            </section>
+          </div>
+        ) : (
+          <EmptyState icon={<Ship />} title="No Kubernetes clusters" body="Tender shows the clusters in your kubeconfig (~/.kube/config, or KUBECONFIG). Create one with kind, k3d or minikube and it appears here." />
+        )}
       </>
     )
   }

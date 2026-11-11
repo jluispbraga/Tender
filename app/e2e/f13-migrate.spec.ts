@@ -130,4 +130,27 @@ test.describe('F18 Kubernetes (read-only)', () => {
     await page.getByRole('option', { name: 'minikube' }).click()
     await expect(page.getByText('minikube did not answer within 6 s. Is the cluster running?')).toBeVisible()
   })
+
+  test('F18-E2 a kubeconfig with a cluster but no context explains how to fix it', async ({ page, open, scan }) => {
+    await open('#/containers')
+    await page.evaluate(() => (window as unknown as { __tenderFake: { setKubeBroken(on: boolean): void } }).__tenderFake.setKubeBroken(true))
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /Kubernetes/ }).click()
+    await expect(page.getByRole('heading', { name: 'Your kubeconfig has no usable context' })).toBeVisible()
+    await expect(page.getByText('Run minikube start', { exact: false })).toBeVisible()
+    await scan('S29 kubeconfig problem')
+  })
+})
+
+test.describe('F19 updates', () => {
+  test('F19-H1 check, then restart to update from Settings or the header', async ({ page, open, scan }) => {
+    await open('#/settings/general')
+    const updates = page.getByRole('region', { name: 'Updates' })
+    await expect(updates).toContainText('Tender 0.4.0')
+    await expect(updates.getByRole('switch', { name: 'Download new versions in the background' })).toBeChecked()
+    await updates.getByRole('button', { name: 'Check now' }).click()
+    await expect(updates).toContainText('Tender 0.4.1 is downloaded')
+    await scan('S21 updates ready')
+    await expect(page.getByRole('button', { name: 'Restart to update to 0.4.1' })).toBeVisible()
+    await page.getByRole('button', { name: 'Restart to update to 0.4.1' }).click()
+  })
 })
