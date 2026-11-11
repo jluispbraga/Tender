@@ -1,4 +1,6 @@
 import { app } from 'electron'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { PassThrough, type Readable } from 'node:stream'
 import Docker from 'dockerode'
 import {
@@ -22,7 +24,25 @@ import {
   type VolumeUsage,
 } from '../../renderer/src/api/types'
 import { dockerOptions, resolveEndpoint, WINDOWS_PIPE, type Endpoint } from './endpoint'
-import { findWslEngine, pipeExists, repairSocket, WslBridge } from './wsl'
+import { findWslEngine, listDistros, pipeExists, repairSocket, WslBridge } from './wsl'
+
+// The WSL distribution whose engine answered last, so Tender can boot it after a restart.
+const wslMemo = () => join(app.getPath('userData'), 'wsl-engine')
+function lastWslDistro(): string | null {
+  try {
+    const d = readFileSync(wslMemo(), 'utf8').trim()
+    return /^[A-Za-z0-9._-]{1,64}$/.test(d) ? d : null
+  } catch {
+    return null
+  }
+}
+function rememberWslDistro(d: string) {
+  try {
+    if (lastWslDistro() !== d) writeFileSync(wslMemo(), d)
+  } catch {
+    // Not remembering only means guessing the default distribution next time.
+  }
+}
 
 type Listener<T> = (v: T) => void
 
@@ -146,7 +166,7 @@ export class Engine {
     if (this.endpoint.address === WINDOWS_PIPE && !app.isPackaged && process.env.TENDER_DEFAULT_PIPE) this.endpoint = { ...this.endpoint, address: `npipe:////./pipe/${process.env.TENDER_DEFAULT_PIPE}` }
     const pipe = this.endpoint.address.replace(/^npipe:\/\/\/\/\.\/pipe\//, '')
     if (this.pipeUp(pipe)) return
-    const r = await findWslEngine()
+    const r = await findWslEngine(await this.toBoot())
     if (!r.found) {
       this.wslMiss = r.why
       this.wslLost = r.lost ?? null
@@ -154,10 +174,29 @@ export class Engine {
     }
     this.wslMiss = null
     this.wslLost = null
+    rememberWslDistro(r.found.distro)
     this.bridge = await WslBridge.open(r.found.distro)
     this.bridged = pipe
     this.endpoint = { name: `wsl:${r.found.distro}`, kind: 'npipe', address: `wsl://${r.found.distro}`, source: `Docker in WSL (${r.found.distro}), since ${this.endpoint.address} is missing`, socketPath: this.bridge.pipe }
   }
+
+  /**
+   * Stopped distributions worth booting: the one whose engine Tender used last, or,
+   * before there is one, the default distribution, tried once. At most once a minute,
+   * so a distribution whose Docker is gone is not booted every few seconds.
+   */
+  private async toBoot(): Promise<string[]> {
+    if (Date.now() - this.lastBoot < 60_000) return []
+    const last = lastWslDistro()
+    if (!last && this.triedDefault) return []
+    this.lastBoot = Date.now()
+    if (last) return [last]
+    this.triedDefault = true
+    const d = (await listDistros()).find((x) => x.isDefault)
+    return d ? [d.name] : []
+  }
+  private lastBoot = 0
+  private triedDefault = false
 
   /** The user asked to give a WSL distribution's engine its socket back (S01). */
   async repairWsl(distro: string): Promise<EngineStatus> {

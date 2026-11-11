@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process'
-import type { WslDistro, WslDistroDetail, WslSetupEvent, WslSetupStep } from '../../renderer/src/api/types'
-import { decode, probe, run } from '../engine/wsl'
+import type { WslDistroDetail, WslSetupEvent, WslSetupStep } from '../../renderer/src/api/types'
+import { decode, listDistros, probe, run } from '../engine/wsl'
+
+export { listDistros }
 
 // Windows only. Installs Docker Engine inside a WSL distribution, the way
 // Docker documents it for Debian and Ubuntu: systemd on, Docker's apt
@@ -8,18 +10,6 @@ import { decode, probe, run } from '../engine/wsl'
 // Compose, the user in the docker group. Commands run as root through
 // `wsl -u root`, so there is no sudo prompt. Every line they print is shown.
 
-/** Every distribution, from `wsl --list --verbose`. Lists only; does not start any. */
-export async function listDistros(): Promise<WslDistro[]> {
-  const r = await run(['--list', '--verbose'], 10_000)
-  if (r.code !== 0) return []
-  return decode(r.stdout)
-    .split(/\r?\n/)
-    .slice(1)
-    .map((l) => /^(\*)?\s*(\S+)\s+(\S+)\s+(\d)\s*$/.exec(l.trim()))
-    .filter((m): m is RegExpExecArray => !!m)
-    .filter((m) => !m[2].startsWith('docker-desktop'))
-    .map((m) => ({ name: m[2], isDefault: !!m[1], running: m[3].toLowerCase() === 'running', version: Number(m[4]) }))
-}
 
 const INSPECT = `
 . /etc/os-release 2>/dev/null
