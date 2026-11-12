@@ -11,6 +11,11 @@ on:
 permissions:
   contents: read
 
+# One release build per tag at a time; pushing the same tag again replaces the old run.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     strategy:
@@ -31,6 +36,9 @@ jobs:
               app/release/*.deb
               app/release/latest-linux.yml
     runs-on: ${{ matrix.os }}
+    # A normal build takes about 7 minutes. Fail a stuck one instead of letting it
+    # sit for days (v0.4.0's first run never started and had to be pushed again).
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: app
@@ -58,6 +66,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:

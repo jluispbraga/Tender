@@ -6,7 +6,8 @@ import { contexts, fileStem, guessEnv, setKubeSources, sourceReport } from './ku
 
 describe('fileStem: the name an added kubeconfig file gives its cluster', () => {
   it.each([
-    ['C:\\Users\\you\\.kube\\prod\\flake-prod-kubeconfig', 'flake-prod'],
+    // Built with this OS's separator: the app only ever sees its own platform's paths.
+    [join('home', 'you', '.kube', 'prod', 'flake-prod-kubeconfig'), 'flake-prod'],
     ['/home/you/.kube/kubeconfig-qa.yaml', 'qa'],
     ['/home/you/.kube/shop_kubeconfig.yml', 'shop'],
     ['/home/you/.kube/eks-staging.yaml', 'eks-staging'],
