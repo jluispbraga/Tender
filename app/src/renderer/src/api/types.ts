@@ -319,7 +319,8 @@ export interface TenderApi {
     configProblem(): Promise<KubeConfigProblem | null>
     namespaces(context: string): Promise<string[]>
     overview(context: string, namespace: string): Promise<KubeOverview>
-    logs(context: string, namespace: string, pod: string, container: string, onEvent: (e: { type: 'lines'; lines: string[] } | { type: 'error'; message: string }) => void): Unsub
+    /** Follows a container's log; with previous, the run before its last restart (kubectl logs --previous). */
+    logs(context: string, namespace: string, pod: string, container: string, onEvent: (e: { type: 'lines'; lines: string[] } | { type: 'error'; message: string }) => void, opts?: { previous?: boolean }): Unsub
     /** What ~/.kube/config and each added file or folder bring in. */
     sources(): Promise<KubeSourceReport>
     /** The system picker, opened in ~/.kube. */

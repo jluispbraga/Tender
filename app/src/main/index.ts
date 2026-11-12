@@ -7,6 +7,7 @@ import { registerIpc } from './ipc'
 import { PipeShare } from './tools/windows-tools'
 import { startUpdates } from './updates'
 import { setKubeSources } from './k8s/kube'
+import { guardMainProcess, setCrashNotify } from './crash-guard'
 import trayIcon from '../../resources/tray.png?asset'
 import trayIcon2x from '../../resources/tray@2x.png?asset'
 import appIcon from '../../resources/icon.png?asset'
@@ -21,6 +22,8 @@ const startHidden = process.argv.includes('--hidden')
 const smoke = !!process.env.TENDER_SMOKE && !app.isPackaged
 if (smoke) app.setPath('userData', join(app.getPath('temp'), `tender-smoke-${process.pid}`))
 else if (!app.requestSingleInstanceLock()) app.quit()
+
+guardMainProcess(join(app.getPath('userData'), 'logs'))
 
 let win: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -168,7 +171,8 @@ app.whenReady().then(() => {
   const settings = store.settings()
   nativeTheme.themeSource = settings.theme
 
-  registerIpc({ engine, store, onSettingChanged, isTrustedSender: trusted, share, beforeUpdateQuit: () => (quitting = true) })
+  const ipc = registerIpc({ engine, store, onSettingChanged, isTrustedSender: trusted, share, beforeUpdateQuit: () => (quitting = true) })
+  setCrashNotify(ipc.notify)
   startUpdates(settings.check_updates)
   setKubeSources(settings.kube_sources)
   engine.onStatus(() => {

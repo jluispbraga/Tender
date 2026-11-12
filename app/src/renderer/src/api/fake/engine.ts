@@ -352,7 +352,11 @@ export function createFakeApi(): TenderApi {
         fakeKubeDeleted.add(a.name)
         return `Deleted ${a.kind.slice(7)} ${a.name}.`
       },
-      logs(_c, _n, pod, _k, onEvent) {
+      logs(_c, _n, pod, _k, onEvent, opts) {
+        if (opts?.previous) {
+          const t = setTimeout(() => onEvent({ type: 'lines', lines: [`${pod} starting`, 'Error: connect ECONNREFUSED 10.96.0.15:5432', 'worker exited with code 1'] }), 100)
+          return () => clearTimeout(t)
+        }
         let i = 0
         const timer = setInterval(() => onEvent({ type: 'lines', lines: [`${pod} line ${++i}`] }), 150)
         return () => clearInterval(timer)

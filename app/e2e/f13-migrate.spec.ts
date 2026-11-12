@@ -199,6 +199,20 @@ test.describe('F18 Kubernetes', () => {
     await expect(page.getByText('Restarting web', { exact: false }).first()).toBeVisible()
   })
 
+  test('F18-H5 a crashing pod opens on the log from before its last restart', async ({ page, open, scan }) => {
+    await open('#/kubernetes')
+    await page.getByRole('button', { name: 'Logs of worker-5c6d7f8-abcde' }).click()
+    await expect(page.getByRole('radio', { name: 'Before the last restart' })).toBeChecked()
+    await expect(page.getByLabel('Log lines')).toContainText('ECONNREFUSED')
+    await scan('S29 previous run logs')
+    await page.getByRole('radio', { name: 'Current run' }).click()
+    await expect(page.getByLabel('Log lines')).toContainText('worker-5c6d7f8-abcde line 1')
+    await expect(page.getByLabel('Log lines')).not.toContainText('ECONNREFUSED')
+    // A pod that never restarted has no choice to make.
+    await page.getByRole('button', { name: 'Logs of web-7d9f8b6c5-x2k4p' }).click()
+    await expect(page.getByRole('radiogroup', { name: 'Which run' })).toHaveCount(0)
+  })
+
   test('F18-E1 a cluster that is not running says so', async ({ page, open }) => {
     await open('#/containers')
     await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /Kubernetes/ }).click()

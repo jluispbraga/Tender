@@ -64,8 +64,11 @@ function expand(path: string): string[] {
  * ~/.kube/config, then what the user added in Settings. Nothing else is read,
  * so a production kubeconfig only shows up when someone adds it on purpose.
  */
+/** The files kubectl itself reads: KUBECONFIG's list, or ~/.kube/config. */
+const baseFiles = () => (process.env.KUBECONFIG ? process.env.KUBECONFIG.split(delimiter).filter((f) => f && existsSync(f)) : [join(kubeDir(), 'config')].filter((f) => existsSync(f)))
+
 function sources(): string[] {
-  const base = process.env.KUBECONFIG ? process.env.KUBECONFIG.split(delimiter).filter((f) => f && existsSync(f)) : [join(kubeDir(), 'config')].filter((f) => existsSync(f))
+  const base = baseFiles()
   const seen = new Set(base.map((f) => f.toLowerCase()))
   const out = [...base]
   for (const f of extra.flatMap(expand)) {
@@ -161,7 +164,7 @@ const reason = (e: unknown) => {
 }
 
 /** "flake-prod-kubeconfig", "kubeconfig-qa.yaml" → "flake-prod", "qa". */
-const fileStem = (file: string) =>
+export const fileStem = (file: string) =>
   basename(file)
     .replace(/\.(ya?ml|conf|config|json)$/i, '')
     .replace(/(^|[-_.])kubeconfig([-_.]|$)/i, (_m, a: string, b: string) => (a && b ? a : ''))
@@ -180,14 +183,16 @@ export function guessEnv(...hints: string[]): KubeEnv | undefined {
 export function contexts(): KubeContext[] {
   const all = entries()
   // The current context is the first file's (~/.kube/config), like kubectl.
-  const current = all[0]?.kc.getCurrentContext()
-  const base = all[0]?.file
+  // kubectl's own files keep their context names; added files are named after the file.
+  const base = new Set(baseFiles().map((f) => f.toLowerCase()))
+  const first = all.find((e) => base.has(e.file.toLowerCase()))
+  const current = first?.kc.getCurrentContext()
   return all.map((e) => {
     const c = e.kc.getContextObject(e.name)!
     const server = e.kc.getCluster(c.cluster)?.server ?? ''
     // Added files are usually one per cluster with a default context name (microk8s,
     // default, admin@k8s): the file name is what tells them apart.
-    const stem = e.file === base ? '' : fileStem(e.file)
+    const stem = base.has(e.file.toLowerCase()) ? '' : fileStem(e.file)
     const inFile = e.kc.getContexts().length
     const defaultLabel = !stem ? e.name : inFile > 1 ? `${stem} / ${e.name}` : stem
     return {
@@ -195,11 +200,12 @@ export function contexts(): KubeContext[] {
       context: e.name,
       key: `${e.file.toLowerCase()}#${e.name}`,
       defaultLabel,
-      guessedEnv: guessEnv(stem, e.name, c.cluster, e.file.slice(0, -basename(e.file).length), server),
+      // The file and context names say the most; the folder (~/.kube/prod/...) only when they say nothing.
+      guessedEnv: guessEnv(stem, e.name, c.cluster, server) ?? guessEnv(e.file.slice(0, -basename(e.file).length)),
       cluster: c.cluster,
       server,
       namespace: c.namespace ?? 'default',
-      current: e.file === base && e.name === current,
+      current: e.file === first?.file && e.name === current,
       file: e.file,
     }
   })
@@ -268,11 +274,13 @@ export async function overview(context: string, namespace: string): Promise<Kube
       pods: pods.items.map((p) => {
         const cs = p.status?.containerStatuses ?? []
         const waiting = cs.find((c) => c.state?.waiting)?.state?.waiting?.reason
+        // A container that just exited (Error, OOMKilled, Completed), as kubectl shows it.
+        const terminated = cs.find((c) => c.state?.terminated)?.state?.terminated?.reason
         return {
           name: p.metadata?.name ?? '',
           namespace: p.metadata?.namespace ?? '',
           // What kubectl get pods shows: a waiting reason (CrashLoopBackOff...) wins over the phase.
-          status: p.metadata?.deletionTimestamp ? 'Terminating' : (waiting ?? p.status?.phase ?? 'Unknown'),
+          status: p.metadata?.deletionTimestamp ? 'Terminating' : (waiting ?? terminated ?? p.status?.phase ?? 'Unknown'),
           ready: `${cs.filter((c) => c.ready).length}/${p.spec?.containers.length ?? cs.length}`,
           restarts: cs.reduce((n, c) => n + (c.restartCount ?? 0), 0),
           node: p.spec?.nodeName,
@@ -302,8 +310,12 @@ export async function overview(context: string, namespace: string): Promise<Kube
   }
 }
 
-/** Follows a pod container's log; returns a function that stops it. */
-export function followLogs(context: string, namespace: string, pod: string, container: string, tail: number, onLines: (lines: string[]) => void, onError: (message: string) => void): () => void {
+/**
+ * Follows a pod container's log; returns a function that stops it. With `previous`,
+ * reads the log of the run before the last restart instead (kubectl logs --previous),
+ * which is where a CrashLoopBackOff's reason is.
+ */
+export function followLogs(context: string, namespace: string, pod: string, container: string, tail: number, onLines: (lines: string[]) => void, onError: (message: string) => void, previous = false): () => void {
   let stopped = false
   const out = new PassThrough()
   // The client pipes the HTTP body into `out` and never listens for its errors, so
@@ -320,12 +332,16 @@ export function followLogs(context: string, namespace: string, pod: string, cont
   })
   let abort: AbortController | null = null
   new k8s.Log(forContext(context))
-    .log(namespace, pod, container, out, { follow: true, tailLines: tail, timestamps: false })
+    .log(namespace, pod, container, out, { follow: !previous, previous, tailLines: tail, timestamps: false })
     .then((a) => {
       abort = a
       if (stopped) a.abort()
     })
-    .catch((e) => onError(reason(e)))
+    .catch((e) => {
+      const why = reason(e)
+      // The client drops the API's reason on a 400; for --previous it means there was no earlier run.
+      onError(previous && /previous terminated container|not found|HTTP-Code: 400/i.test(why) ? `${container} has not restarted since this pod started, so there is no previous run to show.` : why)
+    })
   return () => {
     stopped = true
     abort?.abort()

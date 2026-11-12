@@ -9,6 +9,7 @@ import * as setup from './tools/wsl-setup'
 import * as doctor from './tools/doctor'
 import * as resources from './tools/resources'
 import * as kube from './k8s/kube'
+import { settingValue } from './settings-schema'
 import * as updates from './updates'
 import type { PipeShare } from './tools/windows-tools'
 import { repairSocket } from './engine/wsl'
@@ -27,22 +28,6 @@ const kubeName = z.string().min(1).max(253)
 const distro = z.string().regex(/^[A-Za-z0-9._-]{1,64}$/, 'Not a WSL distribution name.')
 const action = z.enum(['start', 'stop', 'restart', 'pause', 'unpause'])
 const portNum = z.string().regex(/^\d{1,5}$/).refine((s) => +s > 0 && +s < 65536)
-
-const settingValue = {
-  theme: z.enum(['system', 'light', 'dark']),
-  start_on_login: z.boolean(),
-  open_on_start: z.boolean(),
-  only_running: z.boolean(),
-  exec_default_shell: z.enum(['/bin/sh', '/bin/bash', 'cmd.exe']),
-  log_tail_lines: z.number().int().min(50).max(5000),
-  tray_enabled: z.boolean(),
-  share_docker_pipe: z.boolean(),
-  check_updates: z.boolean(),
-  kube_sources: z.array(z.string().min(1).max(1000)).max(50),
-  kube_labels: z
-    .record(z.string().min(1).max(1300), z.object({ name: z.string().trim().max(60).optional(), env: z.enum(['local', 'dev', 'qa', 'prod']).optional() }))
-    .refine((r) => Object.keys(r).length <= 300, 'Too many cluster names.'),
-} as const
 
 export interface IpcDeps {
   engine: Engine
@@ -210,7 +195,7 @@ export function registerIpc(deps: IpcDeps) {
     stats: z.tuple([z.array(id).max(500)]),
     exec: z.tuple([id, z.enum(['/bin/sh', '/bin/bash', 'cmd.exe', 'debug']), z.number().int().min(10).max(1000), z.number().int().min(4).max(500)]),
     installCli: z.tuple([]),
-    kubeLogs: z.tuple([kubeName, kubeName, kubeName, kubeName]),
+    kubeLogs: z.tuple([kubeName, kubeName, kubeName, kubeName, z.boolean()]),
     setupWsl: z.tuple([distro]),
     migrate: z.tuple([distro, z.array(z.string().max(300)).max(2000), z.object({ start: z.boolean() })]),
     pull: z.tuple([z.string().regex(/^[a-z0-9][a-z0-9._\/:@-]{0,255}$/i, 'That isn’t a valid image reference.')]),
@@ -279,7 +264,7 @@ export function registerIpc(deps: IpcDeps) {
           break
         }
         case 'kubeLogs':
-          stop = kube.followLogs(a[0], a[1], a[2], a[3], 500, (lines) => to({ type: 'lines', lines }), (message) => to({ type: 'error', message }))
+          stop = kube.followLogs(a[0], a[1], a[2], a[3], 500, (lines) => to({ type: 'lines', lines }), (message) => to({ type: 'error', message }), a[4])
           break
         case 'installCli': {
           let live = true

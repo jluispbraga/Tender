@@ -329,8 +329,15 @@ function Table({ label, head, rows }: { label: string; head: string[]; rows: Rea
 function PodLogs({ context, pod, container, onContainer, onClose }: { context: string; pod: Pod; container: string; onContainer: (c: string) => void; onClose: () => void }) {
   const [lines, setLines] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  // A crashing pod's current log is usually empty; why it crashed is in the run before.
+  const crashing = pod.restarts > 0 && !/^Running$|^Completed$|^Succeeded$/.test(pod.status)
+  const [previous, setPrevious] = useState(crashing)
   const box = useRef<HTMLPreElement>(null)
-  useEffect(() => api.kube.logs(context, pod.namespace, pod.name, container, (e) => (e.type === 'lines' ? setLines((ls) => [...ls, ...e.lines].slice(-2000)) : setError(e.message))), [context, pod.namespace, pod.name, container])
+  useEffect(() => {
+    setLines([])
+    setError(null)
+    return api.kube.logs(context, pod.namespace, pod.name, container, (e) => (e.type === 'lines' ? setLines((ls) => [...ls, ...e.lines].slice(-2000)) : setError(e.message)), { previous })
+  }, [context, pod.namespace, pod.name, container, previous])
   useEffect(() => {
     if (box.current) box.current.scrollTop = box.current.scrollHeight
   }, [lines])
@@ -343,7 +350,22 @@ function PodLogs({ context, pod, container, onContainer, onClose }: { context: s
             <Select label="Container" value={container} onValueChange={onContainer} options={pod.containers.map((k) => ({ value: k, label: k }))} />
           </div>
         )}
-        <span className="text-muted">following the last 500 lines</span>
+        {pod.restarts > 0 && (
+          <div role="radiogroup" aria-label="Which run" className="inline-flex rounded-md border border-line p-0.5">
+            {([false, true] as const).map((p) => (
+              <button
+                key={String(p)}
+                role="radio"
+                aria-checked={previous === p}
+                onClick={() => setPrevious(p)}
+                className={cn('rounded px-2 py-0.5 text-xs', previous === p ? 'bg-selected font-medium text-fg' : 'text-muted hover:text-fg')}
+              >
+                {p ? 'Before the last restart' : 'Current run'}
+              </button>
+            ))}
+          </div>
+        )}
+        <span className="text-muted">{previous ? `last 500 lines before restart ${pod.restarts}` : 'following the last 500 lines'}</span>
         <div className="flex-1" />
         <Button size="sm" variant="ghost" iconOnly aria-label="Close logs" icon={<X />} onClick={onClose} />
       </div>

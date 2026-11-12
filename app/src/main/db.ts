@@ -79,6 +79,10 @@ export class Store {
   }
 
   // ---- settings -------------------------------------------------------------
+  close() {
+    this.db.close()
+  }
+
   settings(): Settings {
     const rows = this.db.prepare('select key, value from settings').all() as { key: keyof Settings; value: string }[]
     const out = { ...defaultSettings } as Record<string, unknown>
