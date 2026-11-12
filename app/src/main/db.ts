@@ -4,12 +4,16 @@ import { DatabaseSync } from 'node:sqlite'
 import { randomUUID } from 'node:crypto'
 import type { GridPrefs, GridView, Notification, RecentItem, Settings } from '../renderer/src/api/types'
 import m0001 from './migrations/0001_init.sql?raw'
+import m0002 from './migrations/0002_open_settings_keys.sql?raw'
 
 // Local app state (architecture.md, "Schema"). node:sqlite ships with
 // Electron's Node 24, so there is no native module to rebuild. Docker objects
 // are never stored here: the engine owns them.
 
-const migrations: [number, string][] = [[1, m0001]]
+const migrations: [number, string][] = [
+  [1, m0001],
+  [2, m0002],
+]
 
 export const defaultSettings: Settings = {
   theme: 'system',
@@ -21,6 +25,8 @@ export const defaultSettings: Settings = {
   tray_enabled: true,
   share_docker_pipe: true,
   check_updates: true,
+  kube_sources: [],
+  kube_labels: {},
 }
 
 const now = () => new Date().toISOString()

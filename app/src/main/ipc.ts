@@ -38,6 +38,10 @@ const settingValue = {
   tray_enabled: z.boolean(),
   share_docker_pipe: z.boolean(),
   check_updates: z.boolean(),
+  kube_sources: z.array(z.string().min(1).max(1000)).max(50),
+  kube_labels: z
+    .record(z.string().min(1).max(1300), z.object({ name: z.string().trim().max(60).optional(), env: z.enum(['local', 'dev', 'qa', 'prod']).optional() }))
+    .refine((r) => Object.keys(r).length <= 300, 'Too many cluster names.'),
 } as const
 
 export interface IpcDeps {
@@ -71,6 +75,18 @@ export function registerIpc(deps: IpcDeps) {
     'kube.configProblem': { args: z.tuple([]), run: () => kube.configProblem() },
     'kube.namespaces': { args: z.tuple([kubeName]), run: ([c]) => kube.namespaces(c) },
     'kube.overview': { args: z.tuple([kubeName, kubeName]), run: ([c, n]) => kube.overview(c, n) },
+    'kube.sources': { args: z.tuple([]), run: () => kube.sourceReport() },
+    'kube.pickSource': { args: z.tuple([z.enum(['file', 'folder'])]), run: ([k]) => kube.pickSource(k) },
+    'kube.act': {
+      args: z.tuple([
+        kubeName,
+        z.discriminatedUnion('kind', [
+          z.object({ kind: z.enum(['delete-pod', 'delete-deployment', 'delete-service', 'restart-deployment']), namespace: kubeName, name: kubeName }),
+          z.object({ kind: z.literal('scale-deployment'), namespace: kubeName, name: kubeName, replicas: z.number().int().min(0).max(100) }),
+        ]),
+      ]),
+      run: ([c, a]) => kube.act(c, a),
+    },
     'resources.status': { args: z.tuple([]), run: () => resources.status(engine) },
     'resources.act': {
       args: z.tuple([

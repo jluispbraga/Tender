@@ -1,34 +1,67 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Eye, Loader2, RotateCw, Ship, X } from 'lucide-react'
-import { api, type KubeOverview } from '@/api'
+import { Eye, Loader2, Pencil, RefreshCw, RotateCw, Scale, Ship, Trash2, X } from 'lucide-react'
+import { api, type KubeAction, type KubeOverview } from '@/api'
 import { PageHeader } from '@/app/AppShell'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog, Modal } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Input } from '@/components/ui/input'
+import { ActionsMenu } from '@/components/ui/menu'
 import { Select } from '@/components/ui/select'
+import { useToast } from '@/components/ui/toast'
 import { ago } from '@/lib/format'
 import { cn } from '@/lib/cn'
+import { setSetting, useSettings } from '@/lib/queries'
+import { href } from '@/lib/router'
+import { ClusterLabelDialog, EnvBadge, clusterLabel, optionText } from './ClusterLabel'
 
 type Pod = KubeOverview['pods'][number]
+type Deployment = KubeOverview['deployments'][number]
+type Kind = 'pod' | 'deployment' | 'service'
 
-/** A read-only view of the clusters in the kubeconfig: pods, deployments, services, pod logs. */
+/** The clusters in the kubeconfig: pods, deployments, services, pod logs, and restart, scale, delete. */
 export function KubernetesPage() {
-  const contexts = useQuery({ queryKey: ['kube', 'contexts'], queryFn: () => api.kube.contexts() })
+  const toast = useToast()
+  const [pendingDelete, setPendingDelete] = useState<{ kind: Kind; namespace: string; name: string } | null>(null)
+  const [scaling, setScaling] = useState<Deployment | null>(null)
+  // Re-read every few seconds so a kubeconfig dropped into an added folder (or edited) shows up on its own.
+  const contexts = useQuery({ queryKey: ['kube', 'contexts'], queryFn: () => api.kube.contexts(), refetchInterval: 10_000 })
   const problem = useQuery({ queryKey: ['kube', 'problem'], queryFn: () => api.kube.configProblem(), enabled: contexts.data?.length === 0 })
   const [ctx, setCtx] = useState<string | null>(null)
   const [ns, setNs] = useState<string>('*')
   const [tab, setTab] = useState<'pods' | 'deployments' | 'services'>('pods')
   const [logsOf, setLogsOf] = useState<{ pod: Pod; container: string } | null>(null)
   const context = ctx ?? contexts.data?.find((c) => c.current)?.name ?? contexts.data?.[0]?.name ?? null
+  const current = contexts.data?.find((c) => c.name === context)
+  const settings = useSettings()
+  const labels = settings.data?.kube_labels
+  const here = clusterLabel(current, labels)
+  const prod = here.env === 'prod'
+  const [naming, setNaming] = useState(false)
+  const [pendingRestart, setPendingRestart] = useState<Deployment | null>(null)
 
   const namespaces = useQuery({ queryKey: ['kube', 'ns', context], queryFn: () => api.kube.namespaces(context!), enabled: !!context, retry: false })
   const overview = useQuery({ queryKey: ['kube', 'overview', context, ns], queryFn: () => api.kube.overview(context!, ns), enabled: !!context, refetchInterval: 5000, retry: false })
+
+  const act = async (a: KubeAction) => {
+    try {
+      toast({ kind: 'success', title: await api.kube.act(context!, a) })
+      if (a.kind === 'delete-pod' && logsOf?.pod.name === a.name) setLogsOf(null)
+    } catch (e) {
+      toast({ kind: 'error', title: 'Kubernetes refused that', body: (e as Error).message })
+    }
+    void overview.refetch()
+  }
 
   if (contexts.data && !contexts.data.length) {
     const p = problem.data
     return (
       <>
         <PageHeader title="Kubernetes">
+          <a href={href('settings', 'general')} className="text-sm text-accent hover:underline">
+            Kubeconfig files
+          </a>
           <Button icon={<RotateCw />} loading={contexts.isFetching} onClick={() => (void contexts.refetch(), void problem.refetch())}>
             Refresh
           </Button>
@@ -45,7 +78,7 @@ export function KubernetesPage() {
             </section>
           </div>
         ) : (
-          <EmptyState icon={<Ship />} title="No Kubernetes clusters" body="Tender shows the clusters in your kubeconfig (~/.kube/config, or KUBECONFIG). Create one with kind, k3d or minikube and it appears here." />
+          <EmptyState icon={<Ship />} title="No Kubernetes clusters" body="Tender reads ~/.kube/config (or KUBECONFIG) and any kubeconfig file or folder you add under Settings › Kubernetes. Create a cluster with kind, k3d or minikube, or add the file you got for an existing one." />
         )}
       </>
     )
@@ -57,7 +90,7 @@ export function KubernetesPage() {
   return (
     <>
       <PageHeader title="Kubernetes">
-        <div className="w-52">
+        <div className="w-80">
           <Select
             label="Context"
             value={context ?? ''}
@@ -66,20 +99,28 @@ export function KubernetesPage() {
               setNs('*')
               setLogsOf(null)
             }}
-            options={(contexts.data ?? []).map((c) => ({ value: c.name, label: c.name }))}
+            options={(contexts.data ?? []).map((c) => ({ value: c.name, label: optionText(c, clusterLabel(c, labels)) }))}
           />
         </div>
+        <EnvBadge env={here.env} />
+        {current && <Button size="sm" variant="ghost" iconOnly icon={<Pencil />} aria-label="Name this cluster" onClick={() => setNaming(true)} />}
         <div className="w-44">
           <Select label="Namespace" value={ns} onValueChange={(v) => (setNs(v), setLogsOf(null))} options={[{ value: '*', label: 'All namespaces' }, ...(namespaces.data ?? []).map((n) => ({ value: n, label: n }))]} />
         </div>
-        <Button icon={<RotateCw />} loading={overview.isFetching} onClick={() => void overview.refetch()}>
+        <a href={href('settings', 'general')} className="text-sm text-accent hover:underline">
+          Kubeconfig files
+        </a>
+        <Button icon={<RotateCw />} loading={overview.isFetching || contexts.isFetching} onClick={() => (void contexts.refetch(), void namespaces.refetch(), void overview.refetch())}>
           Refresh
         </Button>
       </PageHeader>
       <div className="flex min-h-0 flex-1 flex-col">
-        <p className="shrink-0 border-b border-line px-5 py-2 text-sm text-muted">
-          Read-only: Tender lists and shows logs, and never changes anything in a cluster.
-          {contexts.data?.find((c) => c.name === context)?.server && ` · ${contexts.data.find((c) => c.name === context)!.server}`}
+        <p className={cn('shrink-0 border-b px-5 py-2 text-sm', prod ? 'border-danger bg-danger-bg text-danger' : 'border-line text-muted')}>
+          {prod ? 'Production cluster: restart, scale and delete change ' : 'Restart, scale and delete act on '}
+          <span className={cn('font-medium', prod ? 'text-danger' : 'text-fg')}>{here.label}</span>
+          {here.label !== current?.context && ` (context ${current?.context})`}
+          {current?.server && ` at ${current.server}`}. {prod ? 'Every change asks first; deleting needs the name typed.' : 'Deleting always asks first.'}
+          {current?.file && <span className="block truncate text-xs">From {current.file}</span>}
         </p>
         {overview.isError ? (
           <div className="p-6">
@@ -102,7 +143,7 @@ export function KubernetesPage() {
               {tab === 'pods' && (
                 <Table
                   label="Pods"
-                  head={['Name', 'Namespace', 'Status', 'Ready', 'Restarts', 'Age', '']}
+                  head={['Name', 'Namespace', 'Status', 'Ready', 'Restarts', 'Age', '', '']}
                   rows={data.pods.map((p) => [
                     <span className="font-medium">{p.name}</span>,
                     p.namespace,
@@ -113,17 +154,147 @@ export function KubernetesPage() {
                     <Button size="sm" variant="ghost" icon={<Eye />} aria-label={`Logs of ${p.name}`} onClick={() => setLogsOf({ pod: p, container: p.containers[0] })}>
                       Logs
                     </Button>,
+                    <ActionsMenu label={`Actions for ${p.name}`} entries={[{ label: 'Delete pod', icon: <Trash2 />, danger: true, onSelect: () => setPendingDelete({ kind: 'pod', namespace: p.namespace, name: p.name }) }]} />,
                   ])}
                 />
               )}
-              {tab === 'deployments' && <Table label="Deployments" head={['Name', 'Namespace', 'Ready', 'Up to date', 'Images']} rows={data.deployments.map((d) => [<span className="font-medium">{d.name}</span>, d.namespace, d.ready, d.upToDate, <span className="font-mono text-xs">{d.images.join(', ')}</span>])} />}
-              {tab === 'services' && <Table label="Services" head={['Name', 'Namespace', 'Type', 'Cluster IP', 'Ports']} rows={data.services.map((s) => [<span className="font-medium">{s.name}</span>, s.namespace, s.type, <span className="font-mono text-xs">{s.clusterIP}</span>, s.ports.join(', ')])} />}
+              {tab === 'deployments' && (
+                <Table
+                  label="Deployments"
+                  head={['Name', 'Namespace', 'Ready', 'Up to date', 'Images', '']}
+                  rows={data.deployments.map((d) => [
+                    <span className="font-medium">{d.name}</span>,
+                    d.namespace,
+                    d.ready,
+                    d.upToDate,
+                    <span className="font-mono text-xs">{d.images.join(', ')}</span>,
+                    <ActionsMenu
+                      label={`Actions for ${d.name}`}
+                      entries={[
+                        { label: 'Restart', icon: <RefreshCw />, onSelect: () => (prod ? setPendingRestart(d) : void act({ kind: 'restart-deployment', namespace: d.namespace, name: d.name })) },
+                        { label: 'Scale…', icon: <Scale />, onSelect: () => setScaling(d) },
+                        { kind: 'separator' },
+                        { label: 'Delete deployment', icon: <Trash2 />, danger: true, onSelect: () => setPendingDelete({ kind: 'deployment', namespace: d.namespace, name: d.name }) },
+                      ]}
+                    />,
+                  ])}
+                />
+              )}
+              {tab === 'services' && (
+                <Table
+                  label="Services"
+                  head={['Name', 'Namespace', 'Type', 'Cluster IP', 'Ports', '']}
+                  rows={data.services.map((s) => [
+                    <span className="font-medium">{s.name}</span>,
+                    s.namespace,
+                    s.type,
+                    <span className="font-mono text-xs">{s.clusterIP}</span>,
+                    s.ports.join(', '),
+                    <ActionsMenu label={`Actions for ${s.name}`} entries={[{ label: 'Delete service', icon: <Trash2 />, danger: true, onSelect: () => setPendingDelete({ kind: 'service', namespace: s.namespace, name: s.name }) }]} />,
+                  ])}
+                />
+              )}
             </div>
             {logsOf && context && <PodLogs key={`${logsOf.pod.namespace}/${logsOf.pod.name}/${logsOf.container}`} context={context} pod={logsOf.pod} container={logsOf.container} onContainer={(k) => setLogsOf({ pod: logsOf.pod, container: k })} onClose={() => setLogsOf(null)} />}
           </>
         )}
       </div>
+      <ConfirmDialog
+        open={!!pendingDelete}
+        onOpenChange={(o) => !o && setPendingDelete(null)}
+        title={`Delete ${pendingDelete?.kind} ${pendingDelete?.name}?`}
+        items={pendingDelete ? [`${here.label} / ${pendingDelete.namespace} / ${pendingDelete.name}`] : []}
+        typeToConfirm={prod ? pendingDelete?.name : undefined}
+        impact={
+          pendingDelete?.kind === 'pod'
+            ? 'If a deployment owns it, Kubernetes starts a new pod in its place.'
+            : pendingDelete?.kind === 'deployment'
+              ? 'Its pods stop and are removed too.'
+              : 'Pods behind it keep running, but nothing reaches them through this service.'
+        }
+        confirmLabel={`Delete ${pendingDelete?.kind}`}
+        onConfirm={async () => {
+          const p = pendingDelete!
+          await act({ kind: `delete-${p.kind}`, namespace: p.namespace, name: p.name })
+          setPendingDelete(null)
+        }}
+      />
+      {pendingRestart && (
+        <Modal
+          open
+          onOpenChange={(o) => !o && setPendingRestart(null)}
+          title={`Restart ${pendingRestart.name} in production?`}
+          description={`New pods replace the old ones one by one in ${here.label} / ${pendingRestart.namespace}.`}
+          size="sm"
+          footer={
+            <>
+              <Button onClick={() => setPendingRestart(null)}>Cancel</Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  const d = pendingRestart
+                  setPendingRestart(null)
+                  void act({ kind: 'restart-deployment', namespace: d.namespace, name: d.name })
+                }}
+              >
+                Restart
+              </Button>
+            </>
+          }
+        />
+      )}
+      {naming && current && (
+        <ClusterLabelDialog
+          context={current}
+          current={here}
+          onClose={() => setNaming(false)}
+          onSave={async (v) => {
+            const next = { ...(labels ?? {}) }
+            if (v.name || v.env) next[current.key] = v
+            else delete next[current.key]
+            await setSetting('kube_labels', next)
+            void settings.refetch()
+          }}
+        />
+      )}
+      {scaling && <ScaleDialog prod={prod} clusterName={here.label} deployment={scaling} onClose={() => setScaling(null)} onScale={(replicas) => act({ kind: 'scale-deployment', namespace: scaling.namespace, name: scaling.name, replicas })} />}
     </>
+  )
+}
+
+function ScaleDialog({ deployment, prod, clusterName, onClose, onScale }: { deployment: Deployment; prod: boolean; clusterName: string; onClose: () => void; onScale: (replicas: number) => Promise<void> }) {
+  const [value, setValue] = useState(String(deployment.replicas))
+  const [busy, setBusy] = useState(false)
+  const n = Number(value)
+  const error = value === '' || !Number.isInteger(n) || n < 0 || n > 100 ? 'A whole number from 0 to 100.' : undefined
+  const submit = async () => {
+    if (error) return
+    setBusy(true)
+    await onScale(n)
+    onClose()
+  }
+  return (
+    <Modal
+      open
+      onOpenChange={(o) => !o && !busy && onClose()}
+      title={prod ? `Scale ${deployment.name} in production` : `Scale ${deployment.name}`}
+      description={`${clusterName} / ${deployment.namespace}. Ready now: ${deployment.ready}. 0 stops every pod and keeps the deployment.`}
+      size="sm"
+      footer={
+        <>
+          <Button onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button variant={prod ? 'danger' : 'primary'} loading={busy} disabled={!!error} onClick={() => void submit()}>
+            Scale
+          </Button>
+        </>
+      }
+    >
+      <form onSubmit={(e) => (e.preventDefault(), void submit())}>
+        <Input label="Pods" type="number" min={0} max={100} value={value} onChange={(e) => setValue(e.target.value)} error={error} autoFocus />
+      </form>
+    </Modal>
   )
 }
 

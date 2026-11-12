@@ -78,11 +78,18 @@ export interface ConfirmDialogProps {
   blockedReason?: string
   confirmLabel: string
   onConfirm: () => Promise<void> | void
+  /** When set, the confirm button stays off until this exact text is typed (for production clusters). */
+  typeToConfirm?: string
 }
 
 /** Destructive confirm (S18). Cancel gets initial focus, never the danger button. */
-export function ConfirmDialog({ open, onOpenChange, title, items, impact, blockedReason, confirmLabel, onConfirm }: ConfirmDialogProps) {
+export function ConfirmDialog({ open, onOpenChange, title, items, impact, blockedReason, confirmLabel, onConfirm, typeToConfirm }: ConfirmDialogProps) {
   const [busy, setBusy] = useState(false)
+  const [typed, setTyped] = useState('')
+  useEffect(() => {
+    if (!open) setTyped('')
+  }, [open])
+  const typedOk = !typeToConfirm || typed.trim() === typeToConfirm
   const returnFocus = useReturnFocus(open)
   return (
     <RDialog.Root open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
@@ -110,6 +117,21 @@ export function ConfirmDialog({ open, onOpenChange, title, items, impact, blocke
               {!blockedReason && <p>This can’t be undone.</p>}
             </div>
           </RDialog.Description>
+          {typeToConfirm && !blockedReason && (
+            <label className="flex flex-col gap-1 text-sm text-fg">
+              <span>
+                Type <span className="font-mono font-medium">{typeToConfirm}</span> to confirm
+              </span>
+              <input
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                aria-label={`Type ${typeToConfirm} to confirm`}
+                spellCheck={false}
+                autoComplete="off"
+                className="h-8 rounded-md border border-line-strong bg-bg px-2.5 font-mono text-sm text-fg"
+              />
+            </label>
+          )}
           <div className="flex justify-end gap-2 pt-1">
             <RDialog.Close asChild>
               <Button autoFocus disabled={busy}>
@@ -120,6 +142,7 @@ export function ConfirmDialog({ open, onOpenChange, title, items, impact, blocke
               <Button
                 variant="danger"
                 loading={busy}
+                disabled={!typedOk}
                 onClick={async () => {
                   setBusy(true)
                   try {

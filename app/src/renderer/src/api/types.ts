@@ -186,6 +186,19 @@ export interface Settings {
   share_docker_pipe: boolean
   /** Look for new versions on GitHub and download them in the background. */
   check_updates: boolean
+  /** Kubeconfig files and folders to read besides ~/.kube/config (or KUBECONFIG). */
+  kube_sources: string[]
+  /** The user's name and environment per context, by KubeContext.key. The kubeconfig is never edited. */
+  kube_labels: Record<string, { name?: string; env?: KubeEnv }>
+}
+
+/** Settings › Kubernetes: what each kubeconfig source brings in. */
+export interface KubeSourceReport {
+  /** ~/.kube/config, or each KUBECONFIG entry; always read. */
+  base: { file: string; contexts: string[]; error?: string }[]
+  fromEnv: boolean
+  /** The paths the user added, in order. */
+  added: { path: string; folder: boolean; files: { file: string; contexts: string[]; error?: string }[]; error?: string }[]
 }
 
 export interface KubeConfigProblem {
@@ -299,7 +312,7 @@ export interface TenderApi {
     /** Opens the GitHub Releases page in the browser. */
     openReleases(): Promise<void>
   }
-  /** A read-only view of the Kubernetes clusters in the user's kubeconfig. */
+  /** The Kubernetes clusters in the user's kubeconfig: browse, read logs, restart, scale, delete. */
   kube: {
     contexts(): Promise<KubeContext[]>
     /** When there are no contexts: whether the kubeconfig is broken, and how to fix it. */
@@ -307,6 +320,12 @@ export interface TenderApi {
     namespaces(context: string): Promise<string[]>
     overview(context: string, namespace: string): Promise<KubeOverview>
     logs(context: string, namespace: string, pod: string, container: string, onEvent: (e: { type: 'lines'; lines: string[] } | { type: 'error'; message: string }) => void): Unsub
+    /** What ~/.kube/config and each added file or folder bring in. */
+    sources(): Promise<KubeSourceReport>
+    /** The system picker, opened in ~/.kube. */
+    pickSource(kind: 'file' | 'folder'): Promise<string | null>
+    /** Restarts, scales or deletes one object; resolves with what happened. */
+    act(context: string, action: KubeAction): Promise<string>
   }
   /** Windows: WSL's memory and disks, and the settings that keep them in check. */
   resources: {
@@ -340,19 +359,37 @@ export interface TenderApi {
   }
 }
 
-// ---- Kubernetes (read-only) -------------------------------------------------------
+// ---- Kubernetes ----------------------------------------------------------------------
+
+/** What a cluster is for, as the user marks it (or as Tender guesses from its names). */
+export type KubeEnv = 'local' | 'dev' | 'qa' | 'prod'
 
 export interface KubeContext {
+  /** Unique id for API calls: the context name, plus its file name when two kubeconfig files reuse it. */
   name: string
+  /** The context's own name inside its kubeconfig (often a default such as microk8s). */
+  context: string
+  /** Stable key for the user's name and environment: file + context name. */
+  key: string
+  /** What to call it when the user has not named it: the file name for added files ("flake-prod"), else the context name. */
+  defaultLabel: string
+  /** Tender's guess from the file and context names; the user's choice wins. */
+  guessedEnv?: KubeEnv
   cluster: string
   server: string
   namespace: string
   current: boolean
+  /** The kubeconfig file it comes from (~/.kube/config, ~/.kube/prod/..., or a KUBECONFIG entry). */
+  file?: string
 }
+
+export type KubeAction =
+  | { kind: 'delete-pod' | 'delete-deployment' | 'delete-service' | 'restart-deployment'; namespace: string; name: string }
+  | { kind: 'scale-deployment'; namespace: string; name: string; replicas: number }
 
 export interface KubeOverview {
   pods: { name: string; namespace: string; status: string; ready: string; restarts: number; node?: string; containers: string[]; createdAt?: string }[]
-  deployments: { name: string; namespace: string; ready: string; upToDate: number; images: string[]; createdAt?: string }[]
+  deployments: { name: string; namespace: string; ready: string; replicas: number; upToDate: number; images: string[]; createdAt?: string }[]
   services: { name: string; namespace: string; type: string; clusterIP: string; ports: string[] }[]
 }
 

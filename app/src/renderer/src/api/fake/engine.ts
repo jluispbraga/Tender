@@ -58,7 +58,10 @@ export function createFakeApi(): TenderApi {
     tray_enabled: true,
     share_docker_pipe: true,
     check_updates: true,
+    kube_sources: [],
+    kube_labels: {},
   }
+  const fakeProd = String.raw`C:\Users\you\.kube\prod`
   const grid: Record<GridView, GridPrefs> = { containers: { hidden: ['created'] }, images: { hidden: [] }, volumes: { hidden: [] } }
   const notifications: Notification[] = [
     { id: rid(), kind: 'error', title: 'migrate-once stopped with exit code 1', createdAt: new Date(Date.now() - 5 * 3600_000).toISOString() },
@@ -243,6 +246,8 @@ export function createFakeApi(): TenderApi {
   const activePullByRef = new Map<string, string>()
 
   let fakeDoctorFixed = false
+  const fakeKubeScale = { web: 1 }
+  const fakeKubeDeleted = new Set<string>()
   let fakeKubeBroken = false
   let fakeUpdate: UpdateStatus = { supported: true, current: '0.4.0', state: 'none', releases: 'https://github.com/jluispbraga/Tender/releases' }
   const fakeResources: WslResources = {
@@ -291,8 +296,15 @@ export function createFakeApi(): TenderApi {
         await sleep(100)
         if (fakeKubeBroken) return []
         return [
-          { name: 'kind-dev', cluster: 'kind-dev', server: 'https://127.0.0.1:6443', namespace: 'default', current: true },
-          { name: 'minikube', cluster: 'minikube', server: 'https://127.0.0.1:57796', namespace: 'default', current: false },
+          { name: 'kind-dev', context: 'kind-dev', key: 'config#kind-dev', defaultLabel: 'kind-dev', guessedEnv: 'local' as const, cluster: 'kind-dev', server: 'https://127.0.0.1:6443', namespace: 'default', current: true },
+          { name: 'minikube', context: 'minikube', key: 'config#minikube', defaultLabel: 'minikube', guessedEnv: 'local' as const, cluster: 'minikube', server: 'https://127.0.0.1:57796', namespace: 'default', current: false },
+          // Two clusters set up with microk8s defaults: same context name, told apart by their files.
+          ...(settings.kube_sources.includes(fakeProd)
+            ? [
+                { name: 'microk8s', context: 'microk8s', key: 'prod#flake-prod', defaultLabel: 'flake-prod', guessedEnv: 'prod' as const, cluster: 'microk8s-cluster', server: 'https://10.0.0.12:16443', namespace: 'default', current: false, file: `${fakeProd}\\flake-prod-kubeconfig` },
+                { name: 'microk8s (flake-qa-kubeconfig)', context: 'microk8s', key: 'prod#flake-qa', defaultLabel: 'flake-qa', guessedEnv: 'qa' as const, cluster: 'microk8s-cluster', server: 'https://10.0.0.21:16443', namespace: 'default', current: false, file: `${fakeProd}\\flake-qa-kubeconfig` },
+              ]
+            : []),
         ]
       },
       async namespaces(c) {
@@ -308,15 +320,37 @@ export function createFakeApi(): TenderApi {
           { name: 'worker-5c6d7f8-abcde', namespace: 'shop', status: 'CrashLoopBackOff', ready: '0/1', restarts: 7, node: 'kind-dev-control-plane', containers: ['worker'], createdAt: new Date(Date.now() - 3 * 3600_000).toISOString() },
           { name: 'coredns-5d78c9869d-q8rlz', namespace: 'kube-system', status: 'Running', ready: '1/1', restarts: 0, node: 'kind-dev-control-plane', containers: ['coredns'], createdAt: new Date(Date.now() - 86400_000).toISOString() },
         ]
-        const keep = <T extends { namespace: string }>(xs: T[]) => (ns === '*' ? xs : xs.filter((x) => x.namespace === ns))
+        const keep = <T extends { namespace: string; name: string }>(xs: T[]) => (ns === '*' ? xs : xs.filter((x) => x.namespace === ns)).filter((x) => !fakeKubeDeleted.has(x.name))
         return {
           pods: keep(pods),
           deployments: keep([
-            { name: 'web', namespace: 'shop', ready: '1/1', upToDate: 1, images: ['shop/web:1.4.2'] },
-            { name: 'worker', namespace: 'shop', ready: '0/1', upToDate: 1, images: ['shop/worker:dev'] },
+            { name: 'web', namespace: 'shop', ready: `${fakeKubeScale.web}/${fakeKubeScale.web}`, replicas: fakeKubeScale.web, upToDate: fakeKubeScale.web, images: ['shop/web:1.4.2'] },
+            { name: 'worker', namespace: 'shop', ready: '0/1', replicas: 1, upToDate: 1, images: ['shop/worker:dev'] },
           ]),
           services: keep([{ name: 'web', namespace: 'shop', type: 'NodePort', clusterIP: '10.96.12.40', ports: ['80:30080/TCP'] }]),
         }
+      },
+      async sources() {
+        await sleep(100)
+        return {
+          base: [{ file: String.raw`C:\Users\you\.kube\config`, contexts: ['kind-dev', 'minikube'] }],
+          fromEnv: false,
+          added: settings.kube_sources.map((path) => ({ path, folder: path === fakeProd, files: path === fakeProd ? [{ file: `${fakeProd}\\flake-prod-kubeconfig`, contexts: ['microk8s'] }, { file: `${fakeProd}\\flake-qa-kubeconfig`, contexts: ['microk8s'] }] : [] , error: path === fakeProd ? undefined : 'Not there any more.' })),
+        }
+      },
+      async pickSource(kind) {
+        await sleep(100)
+        return kind === 'folder' ? fakeProd : null
+      },
+      async act(_c, a) {
+        await sleep(200)
+        if (a.kind === 'scale-deployment') {
+          fakeKubeScale.web = a.replicas
+          return `Scaled ${a.name} to ${a.replicas} ${a.replicas === 1 ? 'pod' : 'pods'}.`
+        }
+        if (a.kind === 'restart-deployment') return `Restarting ${a.name}: new pods replace the old ones one by one.`
+        fakeKubeDeleted.add(a.name)
+        return `Deleted ${a.kind.slice(7)} ${a.name}.`
       },
       logs(_c, _n, pod, _k, onEvent) {
         let i = 0

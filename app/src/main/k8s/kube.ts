@@ -1,14 +1,15 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, delimiter, join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import * as k8s from '@kubernetes/client-node'
-import type { KubeConfigProblem, KubeContext, KubeOverview } from '../../renderer/src/api/types'
+import type { KubeAction, KubeConfigProblem, KubeContext, KubeEnv, KubeOverview, KubeSourceReport } from '../../renderer/src/api/types'
 
-// A read-only view of the clusters in the user's kubeconfig (kind, k3d,
-// minikube, or anything else kubectl can reach). Tender lists and reads logs;
-// it never creates, deletes, scales or edits anything, so pointing it at a
-// production context cannot change that cluster.
+// A view of the clusters in the user's kubeconfig (kind, k3d, minikube, or
+// anything else kubectl can reach): pods, deployments, services and pod logs,
+// plus the everyday actions a developer reaches for (restart, scale, delete).
+// Nothing changes a cluster without an explicit click and, for deletes, a
+// confirmation that names the context.
 
 function load(): k8s.KubeConfig {
   const kc = new k8s.KubeConfig()
@@ -21,11 +22,126 @@ function load(): k8s.KubeConfig {
   return kc
 }
 
-function forContext(name: string): k8s.KubeConfig {
-  const kc = load()
-  if (!kc.getContextObject(name)) throw new Error(`No context called ${name} in your kubeconfig.`)
-  kc.setCurrentContext(name)
-  return kc
+const kubeDir = () => join((process.platform === 'win32' && process.env.USERPROFILE) || homedir(), '.kube')
+
+/** Extra kubeconfig files and folders the user added in Settings › Kubernetes. */
+let extra: string[] = []
+export function setKubeSources(paths: string[]) {
+  extra = paths
+}
+
+const looksLikeKubeconfig = (f: string) => {
+  try {
+    const st = statSync(f)
+    if (!st.isFile() || st.size > 1_000_000) return false
+    const text = readFileSync(f, 'utf8')
+    return /^clusters:/m.test(text) && /^contexts:/m.test(text)
+  } catch {
+    return false
+  }
+}
+
+/** The kubeconfig files in a folder (not its subfolders), skipping backups and editor leftovers. */
+function filesIn(dir: string): string[] {
+  let names: string[]
+  try {
+    names = readdirSync(dir).sort()
+  } catch {
+    return []
+  }
+  return names.filter((n) => !n.startsWith('.') && !/\.(bak|old|orig|lock|tmp|swp|log)$/i.test(n)).map((n) => join(dir, n)).filter(looksLikeKubeconfig)
+}
+
+/** The files behind one configured path: the file itself, or the kubeconfigs in the folder. */
+function expand(path: string): string[] {
+  const st = statSync(path, { throwIfNoEntry: false })
+  if (!st) return []
+  return st.isDirectory() ? filesIn(path) : [path]
+}
+
+/**
+ * Every kubeconfig file to read, in order: KUBECONFIG's list (like kubectl) or
+ * ~/.kube/config, then what the user added in Settings. Nothing else is read,
+ * so a production kubeconfig only shows up when someone adds it on purpose.
+ */
+function sources(): string[] {
+  const base = process.env.KUBECONFIG ? process.env.KUBECONFIG.split(delimiter).filter((f) => f && existsSync(f)) : [join(kubeDir(), 'config')].filter((f) => existsSync(f))
+  const seen = new Set(base.map((f) => f.toLowerCase()))
+  const out = [...base]
+  for (const f of extra.flatMap(expand)) {
+    if (seen.has(f.toLowerCase())) continue
+    seen.add(f.toLowerCase())
+    out.push(f)
+  }
+  return out
+}
+
+/** For Settings: what each configured path brings in, so a wrong pick is visible right away. */
+export function sourceReport(): KubeSourceReport {
+  const describe = (file: string) => {
+    const kc = new k8s.KubeConfig()
+    try {
+      kc.loadFromFile(file)
+      return { file, contexts: kc.getContexts().map((c) => c.name) }
+    } catch (e) {
+      return { file, contexts: [], error: `Could not read it: ${reason(e)}` }
+    }
+  }
+  const base = process.env.KUBECONFIG ? process.env.KUBECONFIG.split(delimiter).filter(Boolean) : [join(kubeDir(), 'config')]
+  return {
+    base: base.map((f) => (existsSync(f) ? describe(f) : { file: f, contexts: [], error: 'Not there.' })),
+    fromEnv: !!process.env.KUBECONFIG,
+    added: extra.map((path) => {
+      const st = statSync(path, { throwIfNoEntry: false })
+      if (!st) return { path, folder: false, files: [], error: 'Not there any more.' }
+      const files = expand(path).map(describe)
+      return { path, folder: st.isDirectory(), files, error: st.isDirectory() && !files.length ? 'No kubeconfig files in this folder.' : undefined }
+    }),
+  }
+}
+
+/** Opens the system picker in ~/.kube. Returns the chosen path, or null. */
+export async function pickSource(kind: 'file' | 'folder'): Promise<string | null> {
+  const { dialog } = await import('electron')
+  const r = await dialog.showOpenDialog({
+    title: kind === 'file' ? 'Add a kubeconfig file' : 'Add a folder of kubeconfig files',
+    defaultPath: existsSync(kubeDir()) ? kubeDir() : homedir(),
+    properties: [kind === 'file' ? 'openFile' : 'openDirectory', 'showHiddenFiles'],
+  })
+  return r.canceled ? null : (r.filePaths[0] ?? null)
+}
+
+interface Entry {
+  /** Unique across files: the context name, plus the file name when two files reuse it. */
+  id: string
+  name: string
+  file: string
+  kc: k8s.KubeConfig
+}
+
+function entries(): Entry[] {
+  const out: Entry[] = []
+  for (const file of sources()) {
+    const kc = new k8s.KubeConfig()
+    try {
+      kc.loadFromFile(file)
+    } catch (e) {
+      console.error('[tender] kubeconfig', file, e)
+      continue
+    }
+    for (const c of kc.getContexts()) {
+      const id = out.some((x) => x.id === c.name) ? `${c.name} (${basename(file)})` : c.name
+      out.push({ id, name: c.name, file, kc })
+    }
+  }
+  return out
+}
+
+function forContext(id: string): k8s.KubeConfig {
+  const e = entries().find((x) => x.id === id)
+  if (!e) throw new Error(`No context called ${id} in your kubeconfig files.`)
+  e.kc.setCurrentContext(e.name)
+  return e.kc
 }
 
 /** Fails fast on a cluster that is not running, instead of the client's long default. */
@@ -44,16 +160,49 @@ const reason = (e: unknown) => {
   return String(body ?? err.message ?? e)
 }
 
+/** "flake-prod-kubeconfig", "kubeconfig-qa.yaml" → "flake-prod", "qa". */
+const fileStem = (file: string) =>
+  basename(file)
+    .replace(/\.(ya?ml|conf|config|json)$/i, '')
+    .replace(/(^|[-_.])kubeconfig([-_.]|$)/i, (_m, a: string, b: string) => (a && b ? a : ''))
+    .trim()
+
+/** Tender's guess at what a cluster is for, from its names and address. The user can override it. */
+export function guessEnv(...hints: string[]): KubeEnv | undefined {
+  const h = hints.join(' ').toLowerCase()
+  if (/(^|[^a-z])(prod|prd|production|producao|produção)([^a-z]|$)/.test(h)) return 'prod'
+  if (/(^|[^a-z])(qa|stg|stage|staging|hml|homolog|homologacao|homologação|uat)([^a-z]|$)/.test(h)) return 'qa'
+  if (/(^|[^a-z])(dev|develop|development|desenv)([^a-z]|$)/.test(h)) return 'dev'
+  if (/minikube|(^|[^a-z])(kind|k3d|k3s)-|docker-desktop|rancher-desktop|orbstack|127\.0\.0\.1|localhost|\[::1\]/.test(h)) return 'local'
+  return undefined
+}
+
 export function contexts(): KubeContext[] {
-  let kc: k8s.KubeConfig
-  try {
-    kc = load()
-  } catch (e) {
-    console.error('[tender] kubeconfig:', e)
-    return []
-  }
-  const current = kc.getCurrentContext()
-  return kc.getContexts().map((c) => ({ name: c.name, cluster: c.cluster, server: kc.getCluster(c.cluster)?.server ?? '', namespace: c.namespace ?? 'default', current: c.name === current }))
+  const all = entries()
+  // The current context is the first file's (~/.kube/config), like kubectl.
+  const current = all[0]?.kc.getCurrentContext()
+  const base = all[0]?.file
+  return all.map((e) => {
+    const c = e.kc.getContextObject(e.name)!
+    const server = e.kc.getCluster(c.cluster)?.server ?? ''
+    // Added files are usually one per cluster with a default context name (microk8s,
+    // default, admin@k8s): the file name is what tells them apart.
+    const stem = e.file === base ? '' : fileStem(e.file)
+    const inFile = e.kc.getContexts().length
+    const defaultLabel = !stem ? e.name : inFile > 1 ? `${stem} / ${e.name}` : stem
+    return {
+      name: e.id,
+      context: e.name,
+      key: `${e.file.toLowerCase()}#${e.name}`,
+      defaultLabel,
+      guessedEnv: guessEnv(stem, e.name, c.cluster, e.file.slice(0, -basename(e.file).length), server),
+      cluster: c.cluster,
+      server,
+      namespace: c.namespace ?? 'default',
+      current: e.file === base && e.name === current,
+      file: e.file,
+    }
+  })
 }
 
 /**
@@ -135,6 +284,7 @@ export async function overview(context: string, namespace: string): Promise<Kube
         name: d.metadata?.name ?? '',
         namespace: d.metadata?.namespace ?? '',
         ready: `${d.status?.readyReplicas ?? 0}/${d.spec?.replicas ?? 0}`,
+        replicas: d.spec?.replicas ?? 0,
         upToDate: d.status?.updatedReplicas ?? 0,
         images: d.spec?.template.spec?.containers.map((c) => c.image ?? '') ?? [],
         createdAt: age(d.metadata?.creationTimestamp),
@@ -154,7 +304,13 @@ export async function overview(context: string, namespace: string): Promise<Kube
 
 /** Follows a pod container's log; returns a function that stops it. */
 export function followLogs(context: string, namespace: string, pod: string, container: string, tail: number, onLines: (lines: string[]) => void, onError: (message: string) => void): () => void {
+  let stopped = false
   const out = new PassThrough()
+  // The client pipes the HTTP body into `out` and never listens for its errors, so
+  // aborting the request on stop (closing the log panel) threw an uncaught
+  // AbortError in the main process. Catch it on the source as it is attached.
+  out.on('pipe', (src) => src.on('error', (e: Error) => !stopped && onError(reason(e))))
+  out.on('error', () => {})
   let buf = ''
   out.on('data', (chunk: Buffer) => {
     buf += chunk.toString('utf8')
@@ -163,7 +319,6 @@ export function followLogs(context: string, namespace: string, pod: string, cont
     if (lines.length) onLines(lines)
   })
   let abort: AbortController | null = null
-  let stopped = false
   new k8s.Log(forContext(context))
     .log(namespace, pod, container, out, { follow: true, tailLines: tail, timestamps: false })
     .then((a) => {
@@ -175,5 +330,41 @@ export function followLogs(context: string, namespace: string, pod: string, cont
     stopped = true
     abort?.abort()
     out.destroy()
+  }
+}
+
+/** Restarts, scales or deletes one object, like the matching kubectl command. Returns what happened. */
+export async function act(context: string, a: KubeAction): Promise<string> {
+  const kc = forContext(context)
+  const core = kc.makeApiClient(k8s.CoreV1Api)
+  const apps = kc.makeApiClient(k8s.AppsV1Api)
+  const { name, namespace } = a
+  try {
+    switch (a.kind) {
+      case 'delete-pod':
+        await quick(core.deleteNamespacedPod({ name, namespace }), context)
+        return `Deleted pod ${name}.`
+      case 'delete-deployment':
+        await quick(apps.deleteNamespacedDeployment({ name, namespace, propagationPolicy: 'Background' }), context)
+        return `Deleted deployment ${name} and its pods.`
+      case 'delete-service':
+        await quick(core.deleteNamespacedService({ name, namespace }), context)
+        return `Deleted service ${name}.`
+      case 'restart-deployment':
+        // What kubectl rollout restart does: a new template annotation rolls every pod.
+        await quick(
+          apps.patchNamespacedDeployment(
+            { name, namespace, body: { spec: { template: { metadata: { annotations: { 'kubectl.kubernetes.io/restartedAt': new Date().toISOString() } } } } } },
+            k8s.setHeaderOptions('Content-Type', k8s.PatchStrategy.StrategicMergePatch),
+          ),
+          context,
+        )
+        return `Restarting ${name}: new pods replace the old ones one by one.`
+      case 'scale-deployment':
+        await quick(apps.patchNamespacedDeploymentScale({ name, namespace, body: { spec: { replicas: a.replicas } } }, k8s.setHeaderOptions('Content-Type', k8s.PatchStrategy.MergePatch)), context)
+        return `Scaled ${name} to ${a.replicas} ${a.replicas === 1 ? 'pod' : 'pods'}.`
+    }
+  } catch (e) {
+    throw new Error(reason(e))
   }
 }

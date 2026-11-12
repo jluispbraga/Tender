@@ -50,7 +50,14 @@ export interface DataGridProps<T> {
  */
 export function DataGrid<T>(p: DataGridProps<T>) {
   const [sorting, setSorting] = useState<SortingState>([])
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  // Kept per table across page changes and restarts, so collapsed Compose projects stay collapsed.
+  const [collapsed, setCollapsedState] = useState<Record<string, boolean>>(() => readCollapsed(p.label))
+  const setCollapsed = (f: (c: Record<string, boolean>) => Record<string, boolean>) =>
+    setCollapsedState((c) => {
+      const next = f(c)
+      writeCollapsed(p.label, next)
+      return next
+    })
   const grouped = !Array.isArray(p.data)
   const flat = useMemo(
     () => (Array.isArray(p.data) ? p.data : [...p.data.groups.flatMap((g) => g.rows), ...p.data.ungrouped]),
@@ -260,4 +267,24 @@ export function BulkBar({ count, noun, children, onClear, note }: { count: numbe
       <Button variant="ghost" size="sm" iconOnly aria-label="Clear selection" icon={<X />} onClick={onClear} />
     </div>
   )
+}
+
+const collapsedKey = (label: string) => `tender.grid.collapsed.${label}`
+
+function readCollapsed(label: string): Record<string, boolean> {
+  try {
+    const v = JSON.parse(localStorage.getItem(collapsedKey(label)) ?? '{}')
+    return v && typeof v === 'object' ? v : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeCollapsed(label: string, value: Record<string, boolean>) {
+  try {
+    // Only the collapsed ones: expanded is the default.
+    localStorage.setItem(collapsedKey(label), JSON.stringify(Object.fromEntries(Object.entries(value).filter(([, v]) => v))))
+  } catch {
+    // Storage blocked or full: collapsing still works for this visit.
+  }
 }

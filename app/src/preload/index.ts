@@ -64,6 +64,9 @@ const tender: TenderApi = {
     namespaces: (c) => call('kube.namespaces', c),
     overview: (c, n) => call('kube.overview', c, n),
     logs: (c, n, p, k, onEvent) => quiet(subscribe('kubeLogs', [c, n, p, k], onEvent)),
+    act: (c, a) => call('kube.act', c, a),
+    sources: () => call('kube.sources'),
+    pickSource: (k) => call('kube.pickSource', k),
   },
   resources: {
     status: () => call('resources.status'),

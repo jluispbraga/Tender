@@ -6,6 +6,7 @@ import { Engine } from './engine/engine'
 import { registerIpc } from './ipc'
 import { PipeShare } from './tools/windows-tools'
 import { startUpdates } from './updates'
+import { setKubeSources } from './k8s/kube'
 import trayIcon from '../../resources/tray.png?asset'
 import trayIcon2x from '../../resources/tray@2x.png?asset'
 import appIcon from '../../resources/icon.png?asset'
@@ -143,6 +144,7 @@ function onSettingChanged(key: string, value: unknown) {
   if (key === 'tray_enabled') setupTray(value === true)
   if (key === 'share_docker_pipe') void share.sync(value === true)
   if (key === 'check_updates') startUpdates(value === true)
+  if (key === 'kube_sources') setKubeSources(value as string[])
   if (key === 'theme') nativeTheme.themeSource = value as 'system' | 'light' | 'dark'
 }
 
@@ -168,6 +170,7 @@ app.whenReady().then(() => {
 
   registerIpc({ engine, store, onSettingChanged, isTrustedSender: trusted, share, beforeUpdateQuit: () => (quitting = true) })
   startUpdates(settings.check_updates)
+  setKubeSources(settings.kube_sources)
   engine.onStatus(() => {
     tray?.setContextMenu(trayMenu())
     void share.sync(store.settings().share_docker_pipe)

@@ -33,6 +33,16 @@ test.describe('F06 manage a Compose stack', () => {
     await expect(page.getByRole('region', { name: 'Bulk actions' })).toContainText('4 containers selected')
   })
 
+  test('F06-E4 a collapsed project stays collapsed after leaving the page', async ({ page, open }) => {
+    await open('#/containers')
+    await page.getByRole('button', { name: /^shop/, expanded: true }).click()
+    await expect(row(page, 'Containers', 'nginx:1.27')).toHaveCount(0)
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /Images/ }).click()
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /Containers/ }).click()
+    await expect(page.getByRole('button', { name: /^shop/, expanded: false })).toBeVisible()
+    await expect(row(page, 'Containers', 'nginx:1.27')).toHaveCount(0)
+  })
+
   test('F06-E3 deleting the project containers empties the project page', async ({ page, open }) => {
     await open('#/projects/shop')
     await page.getByRole('button', { name: 'Delete the project’s containers' }).click()

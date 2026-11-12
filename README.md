@@ -43,7 +43,7 @@ On Linux, make the AppImage executable first: `chmod +x Tender-*.AppImage`.
 - See which containers are using a volume before deleting it.
 
 ### Beyond Docker Desktop
-- **Kubernetes, read-only:** pods, deployments, services and pod logs for every context in your kubeconfig (kind, k3d, minikube, any cluster kubectl reaches). Tender never changes anything in a cluster.
+- **Kubernetes:** pods, deployments, services and live pod logs for every context in your kubeconfig (kind, k3d, minikube, any cluster kubectl reaches). Restart or scale a deployment, delete a pod, deployment or service; deletes always ask first and name the context.
 - **Debug shell:** a BusyBox shell that joins a running container's processes and network, for images with no shell of their own (distroless, scratch). The container is not changed.
 - **Checkup:** WSL, the engine, DNS and Windows tools checked in one place, each problem with its fix.
 - **Memory and disk (Windows):** what WSL holds, memory reclaim and a cap, sparse virtual disks that give space back, build cache.

@@ -10,6 +10,7 @@ import { cn } from '@/lib/cn'
 import { api, type Settings } from '@/api'
 import { WindowsTools } from './WindowsTools'
 import { Updates } from './Updates'
+import { KubeSources } from './KubeSources'
 
 const sections = [
   { key: 'general', label: 'General' },
@@ -98,6 +99,9 @@ function GeneralSection() {
       </Group>
       <Group title="Updates">
         <Updates settings={s} save={save} />
+      </Group>
+      <Group title="Kubernetes">
+        <KubeSources settings={s} save={save} />
       </Group>
       <Group title="Containers">
         <Field label="Default shell" description="Used when you open a terminal in a container. You can switch per session.">
