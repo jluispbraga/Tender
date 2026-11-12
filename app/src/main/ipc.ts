@@ -9,6 +9,7 @@ import * as setup from './tools/wsl-setup'
 import * as doctor from './tools/doctor'
 import * as resources from './tools/resources'
 import * as kube from './k8s/kube'
+import * as podTools from './k8s/pod-tools'
 import { settingValue } from './settings-schema'
 import * as updates from './updates'
 import type { PipeShare } from './tools/windows-tools'
@@ -60,6 +61,22 @@ export function registerIpc(deps: IpcDeps) {
     'kube.configProblem': { args: z.tuple([]), run: () => kube.configProblem() },
     'kube.namespaces': { args: z.tuple([kubeName]), run: ([c]) => kube.namespaces(c) },
     'kube.overview': { args: z.tuple([kubeName, kubeName]), run: ([c, n]) => kube.overview(c, n) },
+    'kube.podDetails': { args: z.tuple([kubeName, kubeName, kubeName]), run: ([c, n, p]) => podTools.podDetails(c, n, p) },
+    'kube.forwards': { args: z.tuple([]), run: () => podTools.listForwards() },
+    'kube.startForward': {
+      args: z.tuple([kubeName, z.object({ kind: z.enum(['pod', 'service']), namespace: kubeName, name: kubeName, port: z.number().int().min(1).max(65535) }), z.number().int().min(0).max(65535)]),
+      run: ([c, t, local]) => podTools.startForward(c, t.kind, t.namespace, t.name, t.port, local),
+    },
+    // Only http://localhost:<a port Tender is forwarding>. Nothing else reaches the OS shell.
+    'kube.openForward': {
+      args: z.tuple([z.string().max(20)]),
+      run: ([id]) => {
+        const f = podTools.listForwards().find((x) => x.id === id)
+        if (!f) throw new Error('That port forward has stopped.')
+        return shell.openExternal(`http://localhost:${f.localPort}`)
+      },
+    },
+    'kube.stopForward': { args: z.tuple([z.string().max(20)]), run: ([id]) => podTools.stopForward(id) },
     'kube.sources': { args: z.tuple([]), run: () => kube.sourceReport() },
     'kube.pickSource': { args: z.tuple([z.enum(['file', 'folder'])]), run: ([k]) => kube.pickSource(k) },
     'kube.act': {
@@ -196,6 +213,7 @@ export function registerIpc(deps: IpcDeps) {
     exec: z.tuple([id, z.enum(['/bin/sh', '/bin/bash', 'cmd.exe', 'debug']), z.number().int().min(10).max(1000), z.number().int().min(4).max(500)]),
     installCli: z.tuple([]),
     kubeLogs: z.tuple([kubeName, kubeName, kubeName, kubeName, z.boolean()]),
+    kubeExec: z.tuple([kubeName, kubeName, kubeName, kubeName, z.enum(['auto', '/bin/sh', '/bin/bash']), z.number().int().min(10).max(1000), z.number().int().min(4).max(500)]),
     setupWsl: z.tuple([distro]),
     migrate: z.tuple([distro, z.array(z.string().max(300)).max(2000), z.object({ start: z.boolean() })]),
     pull: z.tuple([z.string().regex(/^[a-z0-9][a-z0-9._\/:@-]{0,255}$/i, 'That isn’t a valid image reference.')]),
@@ -266,6 +284,11 @@ export function registerIpc(deps: IpcDeps) {
         case 'kubeLogs':
           stop = kube.followLogs(a[0], a[1], a[2], a[3], 500, (lines) => to({ type: 'lines', lines }), (message) => to({ type: 'error', message }), a[4])
           break
+        case 'kubeExec': {
+          exec = await podTools.openExec(a[0], a[1], a[2], a[3], a[4], a[5], a[6], (d) => to({ type: 'data', data: d }), (code) => to({ type: 'exit', code }))
+          stop = () => exec!.close()
+          break
+        }
         case 'installCli': {
           let live = true
           stop = () => (live = false)

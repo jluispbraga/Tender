@@ -140,7 +140,7 @@ function entries(): Entry[] {
   return out
 }
 
-function forContext(id: string): k8s.KubeConfig {
+export function forContext(id: string): k8s.KubeConfig {
   const e = entries().find((x) => x.id === id)
   if (!e) throw new Error(`No context called ${id} in your kubeconfig files.`)
   e.kc.setCurrentContext(e.name)
@@ -148,7 +148,7 @@ function forContext(id: string): k8s.KubeConfig {
 }
 
 /** Fails fast on a cluster that is not running, instead of the client's long default. */
-async function quick<T>(p: Promise<T>, what: string, ms = 6000): Promise<T> {
+export async function quick<T>(p: Promise<T>, what: string, ms = 6000): Promise<T> {
   let timer: NodeJS.Timeout | undefined
   try {
     return await Promise.race([p, new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`${what} did not answer within ${ms / 1000} s. Is the cluster running?`)), ms)))])
@@ -157,7 +157,7 @@ async function quick<T>(p: Promise<T>, what: string, ms = 6000): Promise<T> {
   }
 }
 
-const reason = (e: unknown) => {
+export const reason = (e: unknown) => {
   const err = e as { body?: { message?: string } | string; code?: string; message?: string }
   const body = typeof err.body === 'string' ? (() => { try { return JSON.parse(err.body as string).message } catch { return err.body } })() : err.body?.message
   return String(body ?? err.message ?? e)
@@ -285,6 +285,7 @@ export async function overview(context: string, namespace: string): Promise<Kube
           restarts: cs.reduce((n, c) => n + (c.restartCount ?? 0), 0),
           node: p.spec?.nodeName,
           containers: p.spec?.containers.map((c) => c.name) ?? [],
+          ports: [...new Set((p.spec?.containers ?? []).flatMap((c) => (c.ports ?? []).filter((x) => (x.protocol ?? 'TCP') === 'TCP').map((x) => x.containerPort)))],
           createdAt: age(p.metadata?.creationTimestamp),
         }
       }),
@@ -303,6 +304,7 @@ export async function overview(context: string, namespace: string): Promise<Kube
         type: s.spec?.type ?? 'ClusterIP',
         clusterIP: s.spec?.clusterIP ?? '',
         ports: (s.spec?.ports ?? []).map((p) => `${p.port}${p.nodePort ? `:${p.nodePort}` : ''}/${p.protocol ?? 'TCP'}`),
+        portNumbers: (s.spec?.ports ?? []).filter((p) => (p.protocol ?? 'TCP') === 'TCP').map((p) => p.port),
       })),
     }
   } catch (e) {

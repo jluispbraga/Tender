@@ -5,6 +5,7 @@ import {
   type EngineEvent,
   type EngineStatus,
   type GridPrefs,
+  type KubeForward,
   type GridView,
   type TenderApi,
   type ImageRow,
@@ -248,6 +249,8 @@ export function createFakeApi(): TenderApi {
   let fakeDoctorFixed = false
   const fakeKubeScale = { web: 1 }
   const fakeKubeDeleted = new Set<string>()
+  const fakeForwards: KubeForward[] = []
+  let fakeForwardId = 1
   let fakeKubeBroken = false
   let fakeUpdate: UpdateStatus = { supported: true, current: '0.4.0', state: 'none', releases: 'https://github.com/jluispbraga/Tender/releases' }
   const fakeResources: WslResources = {
@@ -316,9 +319,9 @@ export function createFakeApi(): TenderApi {
         await sleep(200)
         if (c === 'minikube') throw new ApiError('minikube did not answer within 6 s. Is the cluster running?')
         const pods = [
-          { name: 'web-7d9f8b6c5-x2k4p', namespace: 'shop', status: 'Running', ready: '1/1', restarts: 0, node: 'kind-dev-control-plane', containers: ['web'], createdAt: new Date(Date.now() - 3 * 3600_000).toISOString() },
-          { name: 'worker-5c6d7f8-abcde', namespace: 'shop', status: 'CrashLoopBackOff', ready: '0/1', restarts: 7, node: 'kind-dev-control-plane', containers: ['worker'], createdAt: new Date(Date.now() - 3 * 3600_000).toISOString() },
-          { name: 'coredns-5d78c9869d-q8rlz', namespace: 'kube-system', status: 'Running', ready: '1/1', restarts: 0, node: 'kind-dev-control-plane', containers: ['coredns'], createdAt: new Date(Date.now() - 86400_000).toISOString() },
+          { name: 'web-7d9f8b6c5-x2k4p', namespace: 'shop', status: 'Running', ready: '1/1', restarts: 0, node: 'kind-dev-control-plane', containers: ['web'], ports: [8080], createdAt: new Date(Date.now() - 3 * 3600_000).toISOString() },
+          { name: 'worker-5c6d7f8-abcde', namespace: 'shop', status: 'CrashLoopBackOff', ready: '0/1', restarts: 7, node: 'kind-dev-control-plane', containers: ['worker'], ports: [], createdAt: new Date(Date.now() - 3 * 3600_000).toISOString() },
+          { name: 'coredns-5d78c9869d-q8rlz', namespace: 'kube-system', status: 'Running', ready: '1/1', restarts: 0, node: 'kind-dev-control-plane', containers: ['coredns'], ports: [53], createdAt: new Date(Date.now() - 86400_000).toISOString() },
         ]
         const keep = <T extends { namespace: string; name: string }>(xs: T[]) => (ns === '*' ? xs : xs.filter((x) => x.namespace === ns)).filter((x) => !fakeKubeDeleted.has(x.name))
         return {
@@ -327,7 +330,7 @@ export function createFakeApi(): TenderApi {
             { name: 'web', namespace: 'shop', ready: `${fakeKubeScale.web}/${fakeKubeScale.web}`, replicas: fakeKubeScale.web, upToDate: fakeKubeScale.web, images: ['shop/web:1.4.2'] },
             { name: 'worker', namespace: 'shop', ready: '0/1', replicas: 1, upToDate: 1, images: ['shop/worker:dev'] },
           ]),
-          services: keep([{ name: 'web', namespace: 'shop', type: 'NodePort', clusterIP: '10.96.12.40', ports: ['80:30080/TCP'] }]),
+          services: keep([{ name: 'web', namespace: 'shop', type: 'NodePort', clusterIP: '10.96.12.40', ports: ['80:30080/TCP'], portNumbers: [80] }]),
         }
       },
       async sources() {
@@ -342,6 +345,52 @@ export function createFakeApi(): TenderApi {
         await sleep(100)
         return kind === 'folder' ? fakeProd : null
       },
+      async podDetails(_c, _ns, pod) {
+        await sleep(150)
+        const crashing = pod.startsWith('worker-')
+        return {
+          node: 'kind-dev-control-plane',
+          ip: crashing ? '10.244.0.17' : '10.244.0.12',
+          startedAt: new Date(Date.now() - 3 * 3600_000).toISOString(),
+          conditions: [
+            { type: 'PodScheduled', ok: true },
+            { type: 'Ready', ok: !crashing, reason: crashing ? 'ContainersNotReady' : undefined, message: crashing ? 'containers with unready status: [worker]' : undefined },
+          ],
+          containers: [
+            crashing
+              ? { name: 'worker', image: 'shop/worker:dev', ready: false, restarts: 7, state: 'waiting: CrashLoopBackOff', message: 'back-off 5m0s restarting failed container=worker', lastTermination: { reason: 'Error', exitCode: 1, finishedAt: new Date(Date.now() - 120_000).toISOString() }, ports: [] }
+              : { name: 'web', image: 'shop/web:1.4.2', ready: true, restarts: 0, state: 'running', ports: [{ port: 8080, name: 'http', protocol: 'TCP' }] },
+          ],
+          events: crashing
+            ? [
+                { type: 'Warning', reason: 'BackOff', message: 'Back-off restarting failed container worker in pod ' + pod, count: 31, lastSeen: new Date(Date.now() - 60_000).toISOString() },
+                { type: 'Normal', reason: 'Pulled', message: 'Container image "shop/worker:dev" already present on machine', count: 8, lastSeen: new Date(Date.now() - 300_000).toISOString() },
+              ]
+            : [],
+        }
+      },
+      async exec(_c, _ns, pod, _k, opts, onData, onExit) {
+        await sleep(200)
+        const row = { id: pod + '00000000000', name: pod, image: 'shop/web:1.4.2' } as unknown as Parameters<typeof createFakeShell>[0]
+        return createFakeShell(row, opts.shell === 'auto' ? '/bin/bash' : opts.shell, onData, onExit)
+      },
+      async forwards() {
+        await sleep(50)
+        return fakeForwards.map((f) => ({ ...f }))
+      },
+      async startForward(c, t, local) {
+        await sleep(150)
+        const localPort = local || 50000 + fakeForwardId
+        if (fakeForwards.some((f) => f.localPort === localPort)) throw new ApiError(`Port ${localPort} on this computer is already in use. Pick another one.`)
+        const f: KubeForward = { id: String(fakeForwardId++), context: c, ...t, localPort, startedAt: new Date().toISOString() }
+        fakeForwards.push(f)
+        return { ...f }
+      },
+      async stopForward(id) {
+        const i = fakeForwards.findIndex((f) => f.id === id)
+        if (i >= 0) fakeForwards.splice(i, 1)
+      },
+      async openForward() {},
       async act(_c, a) {
         await sleep(200)
         if (a.kind === 'scale-deployment') {

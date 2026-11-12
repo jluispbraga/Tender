@@ -66,6 +66,20 @@ const tender: TenderApi = {
     logs: (c, n, p, k, onEvent, opts) => quiet(subscribe('kubeLogs', [c, n, p, k, !!opts?.previous], onEvent)),
     act: (c, a) => call('kube.act', c, a),
     sources: () => call('kube.sources'),
+    podDetails: (c, n, p) => call('kube.podDetails', c, n, p),
+    forwards: () => call('kube.forwards'),
+    startForward: (c, t, local) => call('kube.startForward', c, t, local),
+    stopForward: (id) => call('kube.stopForward', id),
+    openForward: (id) => call('kube.openForward', id),
+    exec: async (c, n, p, k, { shell, cols, rows }, onData, onExit) => {
+      const s = subscribe('kubeExec', [c, n, p, k, shell, cols, rows], (m: { type: 'data'; data: string } | { type: 'exit'; code: number }) => (m.type === 'data' ? onData(m.data) : onExit(m.code)))
+      await s.ready
+      return {
+        write: (data) => ipcRenderer.send('tender:exec', s.id, 'write', data),
+        resize: (cols2, rows2) => ipcRenderer.send('tender:exec', s.id, 'resize', cols2, rows2),
+        close: s.stop,
+      }
+    },
     pickSource: (k) => call('kube.pickSource', k),
   },
   resources: {

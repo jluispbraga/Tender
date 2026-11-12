@@ -213,6 +213,60 @@ test.describe('F18 Kubernetes', () => {
     await expect(page.getByRole('radiogroup', { name: 'Which run' })).toHaveCount(0)
   })
 
+  test('F18-H6 details and events show why a pod is not ready', async ({ page, open, scan }) => {
+    await open('#/kubernetes')
+    await page.getByRole('button', { name: 'Actions for worker-5c6d7f8-abcde' }).click()
+    await page.getByRole('menuitem', { name: 'Details and events' }).click()
+    const panel = page.getByRole('region', { name: 'Pod worker-5c6d7f8-abcde' })
+    await expect(panel.getByRole('tab', { name: 'details' })).toHaveAttribute('aria-selected', 'true')
+    await expect(panel.getByRole('list', { name: 'Containers' })).toContainText('waiting: CrashLoopBackOff')
+    await expect(panel.getByRole('list', { name: 'Containers' })).toContainText('Last run ended: Error, exit code 1')
+    await expect(panel.getByRole('list', { name: 'Events' })).toContainText('BackOff')
+    await expect(panel).toContainText('1 warning')
+    await scan('S29 pod details')
+    // The same panel switches to logs.
+    await panel.getByRole('tab', { name: 'logs' }).click()
+    await expect(panel.getByLabel('Log lines')).toContainText('ECONNREFUSED')
+  })
+
+  test('F18-H7 a terminal in a pod', async ({ page, open }) => {
+    await open('#/kubernetes')
+    await page.getByRole('button', { name: 'Actions for web-7d9f8b6c5-x2k4p' }).click()
+    await page.getByRole('menuitem', { name: 'Open a terminal' }).click()
+    const panel = page.getByRole('region', { name: 'Pod web-7d9f8b6c5-x2k4p' })
+    await expect(panel.getByRole('status')).toContainText('Connected')
+    await page.keyboard.type('echo hi')
+    await page.keyboard.press('Enter')
+    await expect(panel.getByLabel('Terminal in web-7d9f8b6c5-x2k4p')).toContainText('hi')
+  })
+
+  test('F18-H8 forward a service port, open it, stop it', async ({ page, open, scan }) => {
+    await open('#/kubernetes')
+    await page.getByRole('tab', { name: /services/i }).click()
+    await page.getByRole('button', { name: 'Actions for web' }).click()
+    await page.getByRole('menuitem', { name: 'Forward a port…' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Forward a port to web' })
+    await expect(dialog.getByLabel('Service port')).toHaveValue('80')
+    // Port 80 needs admin rights on this computer: the suggestion is 8080.
+    await expect(dialog.getByLabel('Port on this computer')).toHaveValue('8080')
+    await dialog.getByRole('button', { name: 'Start forwarding' }).click()
+    await expect(dialog).toHaveCount(0)
+    const bar = page.getByRole('list', { name: 'Port forwards' })
+    await expect(bar).toContainText('localhost:8080')
+    await expect(bar).toContainText('service web:80')
+    // The success toast trips axe through Radix Toast's own markup; scan the page, not it.
+    await page.getByRole('button', { name: 'Dismiss' }).click()
+    await scan('S29 port forward')
+    // A second forward on the same local port explains itself.
+    await page.getByRole('button', { name: 'Actions for web' }).click()
+    await page.getByRole('menuitem', { name: 'Forward a port…' }).click()
+    await page.getByRole('dialog', { name: 'Forward a port to web' }).getByRole('button', { name: 'Start forwarding' }).click()
+    await expect(page.getByText('Port 8080 on this computer is already in use. Pick another one.')).toBeVisible()
+    await page.getByRole('dialog', { name: 'Forward a port to web' }).getByRole('button', { name: 'Cancel' }).click()
+    await bar.getByRole('button', { name: 'Stop forwarding localhost:8080' }).click()
+    await expect(bar).toHaveCount(0)
+  })
+
   test('F18-E1 a cluster that is not running says so', async ({ page, open }) => {
     await open('#/containers')
     await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /Kubernetes/ }).click()

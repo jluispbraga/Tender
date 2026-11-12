@@ -325,6 +325,17 @@ export interface TenderApi {
     sources(): Promise<KubeSourceReport>
     /** The system picker, opened in ~/.kube. */
     pickSource(kind: 'file' | 'folder'): Promise<string | null>
+    /** kubectl describe pod, the useful part: containers, conditions, recent events. */
+    podDetails(context: string, namespace: string, pod: string): Promise<KubePodDetails>
+    /** A shell in a pod's container (same session shape as a container terminal). */
+    exec(context: string, namespace: string, pod: string, container: string, opts: { shell: 'auto' | '/bin/sh' | '/bin/bash'; cols: number; rows: number }, onData: (d: string) => void, onExit: (code: number) => void): Promise<ExecSession>
+    /** Port forwards running now (they stop when Tender quits). */
+    forwards(): Promise<KubeForward[]>
+    /** Listens on 127.0.0.1:localPort (0: any free port) and tunnels to the pod or service port. */
+    startForward(context: string, target: { kind: 'pod' | 'service'; namespace: string; name: string; port: number }, localPort: number): Promise<KubeForward>
+    stopForward(id: string): Promise<void>
+    /** Opens http://localhost:<its local port> in the browser. */
+    openForward(id: string): Promise<void>
     /** Restarts, scales or deletes one object; resolves with what happened. */
     act(context: string, action: KubeAction): Promise<string>
   }
@@ -384,14 +395,47 @@ export interface KubeContext {
   file?: string
 }
 
+export interface KubePodDetails {
+  node?: string
+  ip?: string
+  startedAt?: string
+  conditions: { type: string; ok: boolean; reason?: string; message?: string }[]
+  containers: {
+    name: string
+    image: string
+    ready: boolean
+    restarts: number
+    /** "running", "waiting: CrashLoopBackOff", "terminated: Error (exit 1)" */
+    state: string
+    message?: string
+    lastTermination?: { reason: string; exitCode: number; finishedAt?: string }
+    ports: { port: number; name?: string; protocol: string }[]
+  }[]
+  /** Newest first. */
+  events: { type: string; reason: string; message: string; count: number; lastSeen?: string }[]
+}
+
+export interface KubeForward {
+  id: string
+  context: string
+  kind: 'pod' | 'service'
+  namespace: string
+  name: string
+  /** The pod or service port. */
+  port: number
+  /** Where it listens on this computer (127.0.0.1). */
+  localPort: number
+  startedAt: string
+}
+
 export type KubeAction =
   | { kind: 'delete-pod' | 'delete-deployment' | 'delete-service' | 'restart-deployment'; namespace: string; name: string }
   | { kind: 'scale-deployment'; namespace: string; name: string; replicas: number }
 
 export interface KubeOverview {
-  pods: { name: string; namespace: string; status: string; ready: string; restarts: number; node?: string; containers: string[]; createdAt?: string }[]
+  pods: { name: string; namespace: string; status: string; ready: string; restarts: number; node?: string; containers: string[]; /** Declared container ports, for forwarding. */ ports: number[]; createdAt?: string }[]
   deployments: { name: string; namespace: string; ready: string; replicas: number; upToDate: number; images: string[]; createdAt?: string }[]
-  services: { name: string; namespace: string; type: string; clusterIP: string; ports: string[] }[]
+  services: { name: string; namespace: string; type: string; clusterIP: string; ports: string[]; /** Plain port numbers, for forwarding. */ portNumbers: number[] }[]
 }
 
 // ---- WSL memory and disk -----------------------------------------------------------

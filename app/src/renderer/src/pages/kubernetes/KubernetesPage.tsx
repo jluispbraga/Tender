@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Eye, Loader2, Pencil, RefreshCw, RotateCw, Scale, Ship, Trash2, X } from 'lucide-react'
+import { Cable, Eye, Info, Loader2, Pencil, RefreshCw, RotateCw, Scale, Ship, SquareTerminal, Trash2 } from 'lucide-react'
 import { api, type KubeAction, type KubeOverview } from '@/api'
 import { PageHeader } from '@/app/AppShell'
 import { Button } from '@/components/ui/button'
@@ -15,6 +15,8 @@ import { cn } from '@/lib/cn'
 import { setSetting, useSettings } from '@/lib/queries'
 import { href } from '@/lib/router'
 import { ClusterLabelDialog, EnvBadge, clusterLabel, optionText } from './ClusterLabel'
+import { ForwardDialog, ForwardsBar, type ForwardTarget } from './Forwards'
+import { PodPanel, type PodTab } from './PodPanel'
 
 type Pod = KubeOverview['pods'][number]
 type Deployment = KubeOverview['deployments'][number]
@@ -31,7 +33,8 @@ export function KubernetesPage() {
   const [ctx, setCtx] = useState<string | null>(null)
   const [ns, setNs] = useState<string>('*')
   const [tab, setTab] = useState<'pods' | 'deployments' | 'services'>('pods')
-  const [logsOf, setLogsOf] = useState<{ pod: Pod; container: string } | null>(null)
+  const [panel, setPanel] = useState<{ pod: Pod; tab: PodTab } | null>(null)
+  const [forwarding, setForwarding] = useState<ForwardTarget | null>(null)
   const context = ctx ?? contexts.data?.find((c) => c.current)?.name ?? contexts.data?.[0]?.name ?? null
   const current = contexts.data?.find((c) => c.name === context)
   const settings = useSettings()
@@ -47,7 +50,7 @@ export function KubernetesPage() {
   const act = async (a: KubeAction) => {
     try {
       toast({ kind: 'success', title: await api.kube.act(context!, a) })
-      if (a.kind === 'delete-pod' && logsOf?.pod.name === a.name) setLogsOf(null)
+      if (a.kind === 'delete-pod' && panel?.pod.name === a.name) setPanel(null)
     } catch (e) {
       toast({ kind: 'error', title: 'Kubernetes refused that', body: (e as Error).message })
     }
@@ -97,7 +100,7 @@ export function KubernetesPage() {
             onValueChange={(v) => {
               setCtx(v)
               setNs('*')
-              setLogsOf(null)
+              setPanel(null)
             }}
             options={(contexts.data ?? []).map((c) => ({ value: c.name, label: optionText(c, clusterLabel(c, labels)) }))}
           />
@@ -105,7 +108,7 @@ export function KubernetesPage() {
         <EnvBadge env={here.env} />
         {current && <Button size="sm" variant="ghost" iconOnly icon={<Pencil />} aria-label="Name this cluster" onClick={() => setNaming(true)} />}
         <div className="w-44">
-          <Select label="Namespace" value={ns} onValueChange={(v) => (setNs(v), setLogsOf(null))} options={[{ value: '*', label: 'All namespaces' }, ...(namespaces.data ?? []).map((n) => ({ value: n, label: n }))]} />
+          <Select label="Namespace" value={ns} onValueChange={(v) => (setNs(v), setPanel(null))} options={[{ value: '*', label: 'All namespaces' }, ...(namespaces.data ?? []).map((n) => ({ value: n, label: n }))]} />
         </div>
         <a href={href('settings', 'general')} className="text-sm text-accent hover:underline">
           Kubeconfig files
@@ -122,6 +125,7 @@ export function KubernetesPage() {
           {current?.server && ` at ${current.server}`}. {prod ? 'Every change asks first; deleting needs the name typed.' : 'Deleting always asks first.'}
           {current?.file && <span className="block truncate text-xs">From {current.file}</span>}
         </p>
+        <ForwardsBar labelOf={(c) => clusterLabel(contexts.data?.find((x) => x.name === c), labels).label || c} />
         {overview.isError ? (
           <div className="p-6">
             <p className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">{(overview.error as Error).message}</p>
@@ -151,10 +155,19 @@ export function KubernetesPage() {
                     p.ready,
                     p.restarts,
                     ago(p.createdAt),
-                    <Button size="sm" variant="ghost" icon={<Eye />} aria-label={`Logs of ${p.name}`} onClick={() => setLogsOf({ pod: p, container: p.containers[0] })}>
+                    <Button size="sm" variant="ghost" icon={<Eye />} aria-label={`Logs of ${p.name}`} onClick={() => setPanel({ pod: p, tab: 'logs' })}>
                       Logs
                     </Button>,
-                    <ActionsMenu label={`Actions for ${p.name}`} entries={[{ label: 'Delete pod', icon: <Trash2 />, danger: true, onSelect: () => setPendingDelete({ kind: 'pod', namespace: p.namespace, name: p.name }) }]} />,
+                    <ActionsMenu
+                      label={`Actions for ${p.name}`}
+                      entries={[
+                        { label: 'Details and events', icon: <Info />, onSelect: () => setPanel({ pod: p, tab: 'details' }) },
+                        { label: 'Open a terminal', icon: <SquareTerminal />, onSelect: () => setPanel({ pod: p, tab: 'terminal' }) },
+                        { label: 'Forward a port…', icon: <Cable />, onSelect: () => setForwarding({ kind: 'pod', namespace: p.namespace, name: p.name, ports: p.ports }) },
+                        { kind: 'separator' },
+                        { label: 'Delete pod', icon: <Trash2 />, danger: true, onSelect: () => setPendingDelete({ kind: 'pod', namespace: p.namespace, name: p.name }) },
+                      ]}
+                    />,
                   ])}
                 />
               )}
@@ -190,12 +203,19 @@ export function KubernetesPage() {
                     s.type,
                     <span className="font-mono text-xs">{s.clusterIP}</span>,
                     s.ports.join(', '),
-                    <ActionsMenu label={`Actions for ${s.name}`} entries={[{ label: 'Delete service', icon: <Trash2 />, danger: true, onSelect: () => setPendingDelete({ kind: 'service', namespace: s.namespace, name: s.name }) }]} />,
+                    <ActionsMenu
+                      label={`Actions for ${s.name}`}
+                      entries={[
+                        { label: 'Forward a port…', icon: <Cable />, onSelect: () => setForwarding({ kind: 'service', namespace: s.namespace, name: s.name, ports: s.portNumbers }) },
+                        { kind: 'separator' },
+                        { label: 'Delete service', icon: <Trash2 />, danger: true, onSelect: () => setPendingDelete({ kind: 'service', namespace: s.namespace, name: s.name }) },
+                      ]}
+                    />,
                   ])}
                 />
               )}
             </div>
-            {logsOf && context && <PodLogs key={`${logsOf.pod.namespace}/${logsOf.pod.name}/${logsOf.container}`} context={context} pod={logsOf.pod} container={logsOf.container} onContainer={(k) => setLogsOf({ pod: logsOf.pod, container: k })} onClose={() => setLogsOf(null)} />}
+            {panel && context && <PodPanel key={`${panel.pod.namespace}/${panel.pod.name}`} context={context} pod={panel.pod} tab={panel.tab} onTab={(t) => setPanel({ pod: panel.pod, tab: t })} onClose={() => setPanel(null)} />}
           </>
         )}
       </div>
@@ -219,6 +239,7 @@ export function KubernetesPage() {
           setPendingDelete(null)
         }}
       />
+      {forwarding && context && <ForwardDialog context={context} clusterName={here.label} target={forwarding} onClose={() => setForwarding(null)} />}
       {pendingRestart && (
         <Modal
           open
@@ -323,56 +344,5 @@ function Table({ label, head, rows }: { label: string; head: string[]; rows: Rea
         ))}
       </tbody>
     </table>
-  )
-}
-
-function PodLogs({ context, pod, container, onContainer, onClose }: { context: string; pod: Pod; container: string; onContainer: (c: string) => void; onClose: () => void }) {
-  const [lines, setLines] = useState<string[]>([])
-  const [error, setError] = useState<string | null>(null)
-  // A crashing pod's current log is usually empty; why it crashed is in the run before.
-  const crashing = pod.restarts > 0 && !/^Running$|^Completed$|^Succeeded$/.test(pod.status)
-  const [previous, setPrevious] = useState(crashing)
-  const box = useRef<HTMLPreElement>(null)
-  useEffect(() => {
-    setLines([])
-    setError(null)
-    return api.kube.logs(context, pod.namespace, pod.name, container, (e) => (e.type === 'lines' ? setLines((ls) => [...ls, ...e.lines].slice(-2000)) : setError(e.message)), { previous })
-  }, [context, pod.namespace, pod.name, container, previous])
-  useEffect(() => {
-    if (box.current) box.current.scrollTop = box.current.scrollHeight
-  }, [lines])
-  return (
-    <section aria-label={`Logs of ${pod.name}`} className="flex h-72 shrink-0 flex-col border-t border-line">
-      <div className="flex shrink-0 items-center gap-3 px-4 py-2 text-sm">
-        <span className="font-medium text-fg">{pod.name}</span>
-        {pod.containers.length > 1 && (
-          <div className="w-40">
-            <Select label="Container" value={container} onValueChange={onContainer} options={pod.containers.map((k) => ({ value: k, label: k }))} />
-          </div>
-        )}
-        {pod.restarts > 0 && (
-          <div role="radiogroup" aria-label="Which run" className="inline-flex rounded-md border border-line p-0.5">
-            {([false, true] as const).map((p) => (
-              <button
-                key={String(p)}
-                role="radio"
-                aria-checked={previous === p}
-                onClick={() => setPrevious(p)}
-                className={cn('rounded px-2 py-0.5 text-xs', previous === p ? 'bg-selected font-medium text-fg' : 'text-muted hover:text-fg')}
-              >
-                {p ? 'Before the last restart' : 'Current run'}
-              </button>
-            ))}
-          </div>
-        )}
-        <span className="text-muted">{previous ? `last 500 lines before restart ${pod.restarts}` : 'following the last 500 lines'}</span>
-        <div className="flex-1" />
-        <Button size="sm" variant="ghost" iconOnly aria-label="Close logs" icon={<X />} onClick={onClose} />
-      </div>
-      {error && <p className="mx-4 rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">{error}</p>}
-      <pre ref={box} tabIndex={0} aria-label="Log lines" className="min-h-0 flex-1 overflow-auto bg-term-bg px-4 py-2 font-mono text-xs whitespace-pre-wrap text-term-text">
-        {lines.join('\n')}
-      </pre>
-    </section>
   )
 }
