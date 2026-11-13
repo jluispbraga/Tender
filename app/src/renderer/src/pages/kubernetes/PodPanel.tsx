@@ -310,3 +310,65 @@ function PodTerminal({ context, pod, container }: { context: string; pod: Pod; c
     </>
   )
 }
+
+/** The pods behind a deployment or StatefulSet, as the logs panel needs them. */
+export type GroupPod = { name: string; namespace: string; container: string }
+
+/**
+ * Every pod of a deployment or StatefulSet in one log, each line tagged with its
+ * pod and kept in time order (like stern). Pods that appear later join in; pods
+ * that go away stop.
+ */
+export function WorkloadPanel({ context, title, tag, pods, onClose }: { context: string; title: string; /** The short name each line is tagged with. */ tag: (pod: string) => string; pods: GroupPod[]; onClose: () => void }) {
+  const [height, setHeight] = usePanelHeight()
+  const [lines, setLines] = useState<LogLine[]>([])
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const subs = useRef(new Map<string, () => void>())
+  const key = pods.map((p) => `${p.namespace}/${p.name}/${p.container}`).join(',')
+  useEffect(() => {
+    const want = new Set(pods.map((p) => `${p.namespace}/${p.name}`))
+    for (const [id, stop] of subs.current) if (!want.has(id)) (stop(), subs.current.delete(id))
+    for (const p of pods) {
+      const id = `${p.namespace}/${p.name}`
+      if (subs.current.has(id)) continue
+      subs.current.set(
+        id,
+        api.kube.logs(context, p.namespace, p.name, p.container, (e) => {
+          if (e.type === 'error') return setErrors((x) => ({ ...x, [p.name]: e.message }))
+          const batch = e.lines.map((raw) => ({ ...podLogLine(raw), source: tag(p.name) }))
+          // Each pod's first burst is its tail: merge by time so the pods interleave.
+          setLines((ls) => [...ls, ...batch].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0)).slice(-MAX_LINES))
+        }),
+      )
+    }
+    // The pods are compared by `key`, not by array identity.
+  }, [context, key])
+  useEffect(() => {
+    const s = subs.current
+    return () => {
+      for (const stop of s.values()) stop()
+      s.clear()
+    }
+  }, [])
+  return (
+    <section aria-label={`Logs of ${title}`} style={{ height }} className="relative flex shrink-0 flex-col border-t border-line">
+      <ResizeHandle height={height} onResize={setHeight} />
+      <div className="flex shrink-0 items-center gap-3 px-4 pt-2 pb-1 text-sm">
+        <span className="truncate font-medium text-fg">{title}</span>
+        <span className="text-muted">
+          {pods.length} {pods.length === 1 ? 'pod' : 'pods'}, last 1,000 lines each, then live
+        </span>
+        <div className="flex-1" />
+        <Button size="sm" variant="ghost" iconOnly aria-label="Close logs panel" icon={<X />} onClick={onClose} />
+      </div>
+      {Object.entries(errors).map(([pod, msg]) => (
+        <p key={pod} className="mx-4 mb-1 rounded-md bg-danger-bg px-3 py-1 text-xs text-danger">
+          {pod}: {msg}
+        </p>
+      ))}
+      <div className="flex min-h-0 flex-1 flex-col border-t border-line">
+        {pods.length ? <LogViewer label={`Logs of ${title}`} fileName={title.replace(/\s+/g, '-')} lines={lines} /> : <p className="p-4 text-sm text-muted">No pods running for {title} right now.</p>}
+      </div>
+    </section>
+  )
+}

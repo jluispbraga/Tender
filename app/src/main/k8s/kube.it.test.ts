@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { act, contexts, followLogs, namespaces, overview } from './kube'
 import { openExec, podDetails, startForward, stopForward } from './pod-tools'
-import { actMore, data, list, yaml } from './resources'
+import { actMore, data, events, list, podUsage, rollouts, yaml } from './resources'
 
 // Against a real cluster: TENDER_KUBE_IT=<context> after applying e2e/kube/fixture.yaml.
 // CI runs it on kind (.github/workflows/kube.yml); without the variable it is skipped.
@@ -88,6 +88,19 @@ describe.skipIf(!ctx)('Kubernetes, against a real cluster', { timeout: 120_000 }
     }
   })
 
+  it('reads the namespace events', async () => {
+    const ev = await events(c, ns)
+    expect(ev.length).toBeGreaterThan(0)
+    expect(ev.some((e) => e.kind === 'Job' && e.name === 'fails' && e.type === 'Warning')).toBe(true)
+    expect(ev.map((e) => e.lastSeen)).toEqual([...ev.map((e) => e.lastSeen)].sort().reverse())
+  })
+
+  it('reads CPU and memory, or says there is no metrics-server', async () => {
+    const u = await podUsage(c, ns)
+    if (u) expect(Object.keys(u).every((k) => k.startsWith(`${ns}/`))).toBe(true)
+    else expect(u).toBeNull()
+  })
+
   it('scales and restarts, runs and pauses a CronJob, deletes', async () => {
     expect(await actMore(c, { kind: 'scale-statefulset', namespace: ns, name: 'db', replicas: 2 })).toBe('Scaled db to 2 pods.')
     await until('2 StatefulSet pods', async () => (await list(c, ns, 'statefulsets'))[0].replicas === 2)
@@ -102,5 +115,23 @@ describe.skipIf(!ctx)('Kubernetes, against a real cluster', { timeout: 120_000 }
     expect(await actMore(c, { kind: 'delete', resource: 'configmaps', namespace: ns, name: 'web-config' })).toBe('Deleted ConfigMap web-config.')
     expect(await actMore(c, { kind: 'delete', resource: 'jobs', namespace: ns, name: 'fails' })).toBe('Deleted job fails.')
     await until('the job’s pod to go too', async () => !(await overview(c, ns)).pods.some((p) => p.owner?.name === 'fails'))
+  })
+
+  it('keeps the rollout history and rolls back to an earlier revision', async () => {
+    // The restart above made revision 2 (same image, new template annotation).
+    const before = await until('two revisions', async () => {
+      const r = await rollouts(c, ns, 'web')
+      return r.length >= 2 && r
+    })
+    expect(before[0].current).toBe(true)
+    const older = before.find((r) => !r.current)!
+    expect(await actMore(c, { kind: 'rollback-deployment', namespace: ns, name: 'web', revision: older.revision })).toContain(`back to revision ${older.revision}`)
+    // kubectl's behaviour: the old ReplicaSet becomes the newest revision.
+    const after = await until('the rollback to land', async () => {
+      const r = await rollouts(c, ns, 'web')
+      return r[0].revision > before[0].revision && r
+    })
+    expect(after[0].current).toBe(true)
+    expect(after[0].images).toEqual(older.images)
   })
 })

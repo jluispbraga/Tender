@@ -344,6 +344,12 @@ export interface TenderApi {
     list(context: string, namespace: string, kind: KubeKind): Promise<KubeItem[]>
     /** The keys of a ConfigMap (with values) or a Secret (names and sizes only). */
     data(context: string, namespace: string, kind: 'configmaps' | 'secrets', name: string): Promise<KubeData>
+    /** Events of one namespace, or all ('*'), newest first. */
+    events(context: string, namespace: string): Promise<KubeEvent[]>
+    /** A deployment's revisions, newest first. */
+    rollouts(context: string, namespace: string, name: string): Promise<KubeRevision[]>
+    /** CPU and memory per pod; null when the cluster has no metrics-server. */
+    usage(context: string, namespace: string): Promise<KubeUsage | null>
     /** kubectl get -o yaml, without managedFields; a Secret's values are blanked. */
     yaml(context: string, kind: 'pods' | 'deployments' | 'services' | KubeKind, namespace: string, name: string): Promise<string>
   }
@@ -453,6 +459,33 @@ export type KubeAction =
   | { kind: 'restart-statefulset' | 'run-cronjob'; namespace: string; name: string }
   | { kind: 'scale-statefulset'; namespace: string; name: string; replicas: number }
   | { kind: 'suspend-cronjob'; namespace: string; name: string; suspend: boolean }
+  | { kind: 'rollback-deployment'; namespace: string; name: string; revision: number }
+
+/** One line of kubectl get events. */
+export interface KubeEvent {
+  type: string
+  reason: string
+  message: string
+  /** The object it is about. */
+  kind: string
+  name: string
+  namespace: string
+  count: number
+  lastSeen?: string
+}
+
+/** One ReplicaSet of a deployment: kubectl rollout history. */
+export interface KubeRevision {
+  revision: number
+  current: boolean
+  images: string[]
+  changeCause?: string
+  createdAt?: string
+  pods: number
+}
+
+/** "namespace/pod" → usage, from metrics-server. */
+export type KubeUsage = Record<string, { cpuMilli: number; memoryBytes: number }>
 
 /** The kinds listed on demand, one tab at a time (pods, deployments and services come with the overview). */
 export type KubeKind = 'statefulsets' | 'jobs' | 'cronjobs' | 'ingresses' | 'configmaps' | 'secrets'

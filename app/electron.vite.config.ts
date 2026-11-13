@@ -16,7 +16,13 @@ export default defineConfig({
   renderer: {
     root: resolve(__dirname, 'src/renderer'),
     plugins: [react(), tailwindcss()],
-    resolve: { alias: { '@': resolve(__dirname, 'src/renderer/src') } },
+    resolve: {
+      alias: [
+        { find: '@', replacement: resolve(__dirname, 'src/renderer/src') },
+        // The app always has the preload API: leave the fake engine (browser runs only) out.
+        { find: /^\.\/fake\/engine$/, replacement: resolve(__dirname, 'src/renderer/src/api/fake/none.ts') },
+      ],
+    },
     build: {
       rollupOptions: { input: resolve(__dirname, 'src/renderer/index.html') },
       // Fonts stay files: the packaged CSP is font-src 'self' (no data: URLs).

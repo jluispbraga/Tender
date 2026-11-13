@@ -441,6 +441,66 @@ test.describe('F18 Kubernetes', () => {
     await expect.poll(async () => (await page.getByRole('region', { name: 'Pod web-7d9f8b6c5-x2k4p' }).boundingBox())!.height).toBe(h1 - 20)
   })
 
+  test('F18-H16 events of the namespace; only problems shows the warnings', async ({ page, open, scan }) => {
+    await open('#/kubernetes')
+    await page.getByRole('tab', { name: 'Events' }).click()
+    const events = page.getByRole('table', { name: 'Events' })
+    await expect(events).toContainText('BackOff')
+    await expect(events).toContainText('ScalingReplicaSet')
+    await scan('S29 events')
+    await page.getByRole('combobox', { name: 'Status' }).click()
+    await page.getByRole('option', { name: 'Only problems' }).click()
+    await expect(events).toContainText('BackoffLimitExceeded')
+    await expect(events).not.toContainText('ScalingReplicaSet')
+    // A pod in an event opens its details.
+    await events.getByRole('button', { name: 'Pod/worker-5c6d7f8-abcde' }).click()
+    await expect(page.getByRole('region', { name: 'Pod worker-5c6d7f8-abcde' }).getByRole('tab', { name: 'details' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  test('F18-H17 the logs of all pods of a deployment, tagged by pod', async ({ page, open, scan }) => {
+    await open('#/kubernetes')
+    await page.getByRole('tab', { name: /^Deployments/ }).click()
+    await page.getByRole('button', { name: 'Actions for web' }).click()
+    await page.getByRole('menuitem', { name: 'Logs of all pods' }).click()
+    const panel = page.getByRole('region', { name: 'Logs of deployment web' })
+    await expect(panel).toContainText('1 pod')
+    const log = panel.getByRole('log', { name: 'Logs of deployment web' })
+    await expect(log).toContainText('web-7d9f8b6c5-x2k4p line 2')
+    // Each line names its pod by the suffix that tells replicas apart.
+    await expect(log.locator('[data-line]').first()).toContainText('x2k4p')
+    await scan('S29 deployment logs')
+  })
+
+  test('F18-H18 rollout history, and rolling back asks first', async ({ page, open, scan }) => {
+    await open('#/kubernetes')
+    await page.getByRole('tab', { name: /^Deployments/ }).click()
+    await page.getByRole('button', { name: 'Actions for web' }).click()
+    await page.getByRole('menuitem', { name: 'Rollout history…' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Rollout history of web' })
+    const revisions = dialog.getByRole('list', { name: 'Revisions' })
+    await expect(revisions).toContainText('Revision 3')
+    await expect(revisions).toContainText('running now')
+    await expect(revisions).toContainText('deploy 1.4.2')
+    await scan('S29 rollout history')
+    await dialog.getByRole('button', { name: 'Roll back to this' }).first().click()
+    const confirm = dialog.getByRole('group', { name: 'Confirm rollback to revision 2' })
+    await expect(confirm).toContainText('shop/web:1.4.1')
+    await confirm.getByRole('button', { name: 'Roll back' }).click()
+    await expect(page.getByText('Rolling web back to revision 2', { exact: false }).first()).toBeVisible()
+    await expect(dialog).toHaveCount(0)
+  })
+
+  test('F18-H19 CPU and memory per pod when the cluster has metrics-server', async ({ page, open }) => {
+    await open('#/kubernetes')
+    const pods = page.getByRole('table', { name: 'Pods' })
+    await expect(pods.getByRole('columnheader', { name: 'CPU / Memory' })).toBeVisible()
+    await expect(pods).toContainText('12m · 84 MiB')
+    // minikube in the fake has no metrics-server: no column at all.
+    await page.getByRole('combobox', { name: 'Context' }).click()
+    await page.getByRole('option', { name: /^minikube/ }).click()
+    await expect(page.getByRole('columnheader', { name: 'CPU / Memory' })).toHaveCount(0)
+  })
+
   test('F18-E1 a cluster that is not running says so', async ({ page, open }) => {
     await open('#/containers')
     await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /Kubernetes/ }).click()

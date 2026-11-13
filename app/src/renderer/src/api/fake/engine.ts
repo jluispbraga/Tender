@@ -251,7 +251,7 @@ export function createFakeApi(): TenderApi {
   let fakeDoctorFixed = false
   const fakeKubeScale = { web: 1 }
   const fakeKubeDeleted = new Set<string>()
-  const fakeMore = { dbReplicas: 1, nightlySuspended: false, manualRuns: [] as string[] }
+  const fakeMore = { dbReplicas: 1, nightlySuspended: false, manualRuns: [] as string[], webRevision: 3 }
   const fakeForwards: KubeForward[] = []
   let fakeForwardId = 1
   let fakeKubeBroken = false
@@ -322,10 +322,10 @@ export function createFakeApi(): TenderApi {
         await sleep(200)
         if (c === 'minikube') throw new ApiError('minikube did not answer within 6 s. Is the cluster running?')
         const pods = [
-          { name: 'web-7d9f8b6c5-x2k4p', namespace: 'shop', status: 'Running', ready: '1/1', restarts: 0, node: 'kind-dev-control-plane', containers: ['web'], ports: [8080], createdAt: new Date(Date.now() - 3 * 3600_000).toISOString() },
-          { name: 'worker-5c6d7f8-abcde', namespace: 'shop', status: 'CrashLoopBackOff', ready: '0/1', restarts: 7, node: 'kind-dev-control-plane', containers: ['worker'], ports: [], createdAt: new Date(Date.now() - 3 * 3600_000).toISOString() },
+          { name: 'web-7d9f8b6c5-x2k4p', namespace: 'shop', status: 'Running', ready: '1/1', restarts: 0, node: 'kind-dev-control-plane', containers: ['web'], ports: [8080], createdAt: new Date(Date.now() - 3 * 3600_000).toISOString() , owner: { kind: 'ReplicaSet', name: 'web-7d9f8b6c5' } },
+          { name: 'worker-5c6d7f8-abcde', namespace: 'shop', status: 'CrashLoopBackOff', ready: '0/1', restarts: 7, node: 'kind-dev-control-plane', containers: ['worker'], ports: [], createdAt: new Date(Date.now() - 3 * 3600_000).toISOString() , owner: { kind: 'ReplicaSet', name: 'worker-5c6d7f8' } },
           { name: 'migrate-v42-7xk2p', namespace: 'shop', status: 'Error', ready: '0/1', restarts: 0, node: 'kind-dev-control-plane', containers: ['migrate'], ports: [], createdAt: new Date(Date.now() - 2 * 3600_000).toISOString(), owner: { kind: 'Job', name: 'migrate-v42' } },
-          { name: 'coredns-5d78c9869d-q8rlz', namespace: 'kube-system', status: 'Running', ready: '1/1', restarts: 0, node: 'kind-dev-control-plane', containers: ['coredns'], ports: [53], createdAt: new Date(Date.now() - 86400_000).toISOString() },
+          { name: 'coredns-5d78c9869d-q8rlz', namespace: 'kube-system', status: 'Running', ready: '1/1', restarts: 0, node: 'kind-dev-control-plane', containers: ['coredns'], ports: [53], createdAt: new Date(Date.now() - 86400_000).toISOString() , owner: { kind: 'ReplicaSet', name: 'coredns-5d78c9869d' } },
         ]
         const keep = <T extends { namespace: string; name: string }>(xs: T[]) => (ns === '*' ? xs : xs.filter((x) => x.namespace === ns)).filter((x) => !fakeKubeDeleted.has(x.name))
         return {
@@ -402,6 +402,10 @@ export function createFakeApi(): TenderApi {
           return `Scaled ${a.name} to ${a.replicas} ${a.replicas === 1 ? 'pod' : 'pods'}.`
         }
         if (a.kind === 'restart-deployment') return `Restarting ${a.name}: new pods replace the old ones one by one.`
+        if (a.kind === 'rollback-deployment') {
+          fakeMore.webRevision = 4
+          return `Rolling ${a.name} back to revision ${a.revision}: shop/web:1.4.${a.revision - 1}.`
+        }
         if (a.kind === 'restart-statefulset') return `Restarting ${a.name}: its pods are replaced one at a time, highest number first.`
         if (a.kind === 'scale-statefulset') {
           fakeMore.dbReplicas = a.replicas
@@ -435,6 +439,31 @@ export function createFakeApi(): TenderApi {
           secrets: [{ name: 'db-password', namespace: 'shop', createdAt: at(50), fields: { type: 'Opaque', keys: 'password, username', count: '2' } }],
         }
         return items[kind].filter((x) => (ns === '*' || x.namespace === ns) && !fakeKubeDeleted.has(x.name))
+      },
+      async events(_c, ns) {
+        await sleep(120)
+        const ago = (m: number) => new Date(Date.now() - m * 60_000).toISOString()
+        const all = [
+          { type: 'Warning', reason: 'BackOff', message: 'Back-off restarting failed container worker in pod worker-5c6d7f8-abcde', kind: 'Pod', name: 'worker-5c6d7f8-abcde', namespace: 'shop', count: 41, lastSeen: ago(1) },
+          { type: 'Normal', reason: 'Pulled', message: 'Container image "shop/web:1.4.2" already present on machine', kind: 'Pod', name: 'web-7d9f8b6c5-x2k4p', namespace: 'shop', count: 1, lastSeen: ago(12) },
+          { type: 'Warning', reason: 'BackoffLimitExceeded', message: 'Job has reached the specified backoff limit', kind: 'Job', name: 'migrate-v42', namespace: 'shop', count: 1, lastSeen: ago(30) },
+          { type: 'Normal', reason: 'ScalingReplicaSet', message: 'Scaled up replica set web-7d9f8b6c5 to 1', kind: 'Deployment', name: 'web', namespace: 'shop', count: 1, lastSeen: ago(180) },
+        ]
+        return all.filter((e) => ns === '*' || e.namespace === ns)
+      },
+      async rollouts(_c, _ns, name) {
+        await sleep(120)
+        if (name !== 'web') return [{ revision: 1, current: true, images: ['shop/worker:dev'], createdAt: new Date(Date.now() - 3 * 3600_000).toISOString(), pods: 1 }]
+        const cur = fakeMore.webRevision
+        return [4, 3, 2]
+          .filter((r) => r <= cur)
+          .map((r) => ({ revision: r, current: r === cur, images: [`shop/web:1.4.${r === 4 ? 1 : r - 1}`], changeCause: r === 3 ? 'deploy 1.4.2' : undefined, createdAt: new Date(Date.now() - (5 - r) * 86400_000).toISOString(), pods: r === cur ? fakeKubeScale.web : 0 }))
+      },
+      async usage(c, ns) {
+        await sleep(100)
+        if (c !== 'kind-dev') return null
+        const u = { 'shop/web-7d9f8b6c5-x2k4p': { cpuMilli: 12, memoryBytes: 84 * 2 ** 20 }, 'shop/worker-5c6d7f8-abcde': { cpuMilli: 0, memoryBytes: 3 * 2 ** 20 }, 'kube-system/coredns-5d78c9869d-q8rlz': { cpuMilli: 3, memoryBytes: 19 * 2 ** 20 } }
+        return Object.fromEntries(Object.entries(u).filter(([k]) => ns === '*' || k.startsWith(`${ns}/`)))
       },
       async yaml(_c, kind, ns, name) {
         await sleep(100)

@@ -79,7 +79,7 @@ export function MoreKinds({
   onChange: (r: ChangeRequest) => void
   onScale: (r: ScaleRequest) => void
   onView: (i: KubeItem) => void
-  /** Jobs: show the log of the pod it ran. */
+  /** Jobs: the log of the pod it ran. StatefulSets: the logs of all its pods. */
   onLogs: (i: KubeItem) => void
   onYaml: (i: KubeItem) => void
   filter: string
@@ -101,6 +101,7 @@ export function MoreKinds({
       kind === 'statefulsets'
         ? [
             { label: 'Restart', icon: <RefreshCw />, onSelect: () => onChange({ title: `Restart ${i.name} in production?`, description: `Its pods are replaced one at a time in ${where}.`, label: 'Restart', action: { kind: 'restart-statefulset', ...at } }) },
+            { label: 'Logs of all pods', icon: <FileText />, onSelect: () => onLogs(i) },
             { label: 'Scale…', icon: <Scale />, onSelect: () => onScale({ what: 'StatefulSet', ...at, ready: i.fields.ready, replicas: i.replicas ?? 0, to: (n) => ({ kind: 'scale-statefulset', ...at, replicas: n }) }) },
           ]
         : kind === 'cronjobs'

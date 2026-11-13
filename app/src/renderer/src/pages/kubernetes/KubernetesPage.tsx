@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Braces, Cable, Eye, Info, Loader2, Pencil, RefreshCw, RotateCw, Scale, Ship, SquareTerminal, Trash2 } from 'lucide-react'
+import { Braces, Cable, Eye, FileText, History, Info, Loader2, Pencil, RefreshCw, RotateCw, Scale, Ship, SquareTerminal, Trash2 } from 'lucide-react'
 import { api, type KubeAction, type KubeItem, type KubeKind, type KubeOverview } from '@/api'
 import { PageHeader } from '@/app/AppShell'
 import { Button } from '@/components/ui/button'
@@ -18,15 +18,19 @@ import { ClusterLabelDialog, EnvBadge, clusterLabel, optionText } from './Cluste
 import { ForwardDialog, ForwardsBar, type ForwardTarget } from './Forwards'
 import { deploymentProblem, podProblem } from './health'
 import { DataDialog, MoreKinds, NoStatus, kindLabel, type ChangeRequest, type DeleteRequest, type ScaleRequest } from './MoreKinds'
-import { PodPanel, type PodTab } from './PodPanel'
+import { EventsTab } from './EventsTab'
+import { PodPanel, WorkloadPanel, type PodTab } from './PodPanel'
+import { RolloutDialog } from './RolloutDialog'
 import { Table } from './Table'
 import { YamlDialog, type YamlTarget } from './YamlDialog'
 
 type Pod = KubeOverview['pods'][number]
-type Tab = 'pods' | 'deployments' | 'services' | KubeKind
-const tabs: Tab[] = ['pods', 'deployments', 'services', 'statefulsets', 'jobs', 'cronjobs', 'ingresses', 'configmaps', 'secrets']
-const tabLabel = (t: Tab) => (t === 'pods' ? 'Pods' : t === 'deployments' ? 'Deployments' : t === 'services' ? 'Services' : kindLabel[t])
-const isMore = (t: Tab): t is KubeKind => !['pods', 'deployments', 'services'].includes(t)
+type Tab = 'pods' | 'deployments' | 'services' | KubeKind | 'events'
+const tabs: Tab[] = ['pods', 'deployments', 'services', 'statefulsets', 'jobs', 'cronjobs', 'ingresses', 'configmaps', 'secrets', 'events']
+const tabLabel = (t: Tab) => (t === 'pods' ? 'Pods' : t === 'deployments' ? 'Deployments' : t === 'services' ? 'Services' : t === 'events' ? 'Events' : kindLabel[t])
+const isMore = (t: Tab): t is KubeKind => !['pods', 'deployments', 'services', 'events'].includes(t)
+const mib = (b: number) => (b >= 1024 * 2 ** 20 ? `${(b / 2 ** 30).toFixed(1)} GiB` : `${Math.round(b / 2 ** 20)} MiB`)
+type Group = { kind: 'deployment' | 'statefulset'; namespace: string; name: string }
 
 /** The clusters in the kubeconfig: pods, deployments, services, pod logs, and restart, scale, delete. */
 export function KubernetesPage() {
@@ -42,6 +46,11 @@ export function KubernetesPage() {
   const [ns, setNs] = useState<string>('*')
   const [tab, setTab] = useState<Tab>('pods')
   const [panel, setPanel] = useState<{ pod: Pod; tab: PodTab } | null>(null)
+  // One panel at a time under the list: a pod's, or the logs of a workload's pods.
+  const [group, setGroup] = useState<Group | null>(null)
+  useEffect(() => void (panel && setGroup(null)), [panel])
+  useEffect(() => void (group && setPanel(null)), [group])
+  const [history, setHistory] = useState<{ namespace: string; name: string } | null>(null)
   const [filter, setFilter] = useState('')
   const [problemsOnly, setProblemsOnly] = useState(false)
   const [yamlOf, setYamlOf] = useState<YamlTarget | null>(null)
@@ -56,6 +65,7 @@ export function KubernetesPage() {
   const [pendingChange, setPendingChange] = useState<ChangeRequest | null>(null)
 
   const namespaces = useQuery({ queryKey: ['kube', 'ns', context], queryFn: () => api.kube.namespaces(context!), enabled: !!context, retry: false })
+  const usage = useQuery({ queryKey: ['kube', 'usage', context, ns], queryFn: () => api.kube.usage(context!, ns), enabled: !!context, refetchInterval: 10_000, retry: false })
   const overview = useQuery({ queryKey: ['kube', 'overview', context, ns], queryFn: () => api.kube.overview(context!, ns), enabled: !!context, refetchInterval: 5000, retry: false })
 
   const act = async (a: KubeAction) => {
@@ -109,6 +119,16 @@ export function KubernetesPage() {
     services: named(overview.data.services),
   }
   const counts: Partial<Record<Tab, number>> = { pods: data?.pods.length, deployments: data?.deployments.length, services: data?.services.length }
+  // A deployment's pods belong to its ReplicaSets, named <deployment>-<hash>.
+  const groupPods = (g: Group) =>
+    (overview.data?.pods ?? [])
+      .filter((p) => p.namespace === g.namespace && (g.kind === 'deployment' ? p.owner?.kind === 'ReplicaSet' && new RegExp(`^${g.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-[a-z0-9]+$`).test(p.owner.name) : p.owner?.kind === 'StatefulSet' && p.owner.name === g.name))
+      .map((p) => ({ name: p.name, namespace: p.namespace, container: p.containers[0] }))
+  const openPod = (namespace: string, name: string) => {
+    const pod = overview.data?.pods.find((p) => p.namespace === namespace && p.name === name)
+    if (pod) setPanel({ pod, tab: 'details' })
+    else toast({ kind: 'info', title: `${name} is gone`, body: 'The pod no longer exists; its events stay for about an hour.' })
+  }
   // A job's log is its pod's: the newest pod the job made.
   const jobLogs = (job: KubeItem) => {
     const pod = (overview.data?.pods ?? []).filter((p) => p.owner?.kind === 'Job' && p.owner.name === job.name && p.namespace === job.namespace).sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))[0]
@@ -181,13 +201,18 @@ export function KubernetesPage() {
                   label="Pods"
                   filter={q}
                   problemsOnly={problemsOnly}
-                  head={['Name', 'Namespace', 'Status', 'Ready', 'Restarts', 'Age', '', '']}
+                  head={['Name', 'Namespace', 'Status', 'Ready', 'Restarts', ...(usage.data ? ['CPU / Memory'] : []), 'Age', '', '']}
                   rows={data.pods.map((p) => [
-                    <span className="font-medium">{p.name}</span>,
+                    <span className="font-medium break-all">{p.name}</span>,
                     p.namespace,
                     <span className={/Running|Completed|Succeeded/.test(p.status) ? 'text-success' : /Pending|ContainerCreating|Terminating/.test(p.status) ? 'text-muted' : 'text-danger'}>{p.status}</span>,
                     p.ready,
                     p.restarts,
+                    ...(usage.data
+                      ? [
+                          ((u) => (u ? <span className="tabular-nums">{u.cpuMilli}m · {mib(u.memoryBytes)}</span> : <span className="text-muted">—</span>))(usage.data[`${p.namespace}/${p.name}`]),
+                        ]
+                      : []),
                     ago(p.createdAt),
                     <Button size="sm" variant="ghost" icon={<Eye />} aria-label={`Logs of ${p.name}`} onClick={() => setPanel({ pod: p, tab: 'logs' })}>
                       Logs
@@ -221,6 +246,8 @@ export function KubernetesPage() {
                     <ActionsMenu
                       label={`Actions for ${d.name}`}
                       entries={[
+                        { label: 'Logs of all pods', icon: <FileText />, onSelect: () => setGroup({ kind: 'deployment', namespace: d.namespace, name: d.name }) },
+                        { label: 'Rollout history…', icon: <History />, onSelect: () => setHistory({ namespace: d.namespace, name: d.name }) },
                         { label: 'Restart', icon: <RefreshCw />, onSelect: () => change({ title: `Restart ${d.name} in production?`, description: `New pods replace the old ones one by one in ${here.label} / ${d.namespace}.`, label: 'Restart', action: { kind: 'restart-deployment', namespace: d.namespace, name: d.name } }) },
                         { label: 'View YAML', icon: <Braces />, onSelect: () => setYamlOf({ kind: 'deployments', namespace: d.namespace, name: d.name }) },
                         { label: 'Scale…', icon: <Scale />, onSelect: () => setScaling({ what: 'deployment', name: d.name, namespace: d.namespace, ready: d.ready, replicas: d.replicas, to: (n) => ({ kind: 'scale-deployment', namespace: d.namespace, name: d.name, replicas: n }) }) },
@@ -265,13 +292,24 @@ export function KubernetesPage() {
                   onChange={change}
                   onScale={setScaling}
                   onView={(item) => setViewing({ kind: tab === 'secrets' ? 'secrets' : 'configmaps', item })}
-                  onLogs={jobLogs}
+                  onLogs={(i) => (tab === 'jobs' ? jobLogs(i) : setGroup({ kind: 'statefulset', namespace: i.namespace, name: i.name }))}
                   onYaml={(i) => setYamlOf({ kind: tab, namespace: i.namespace, name: i.name })}
                   filter={q}
                   problemsOnly={problemsOnly}
                 />
               )}
             </div>
+            {tab === 'events' && context && <EventsTab context={context} namespace={ns} filter={q} problemsOnly={problemsOnly} onOpenPod={openPod} />}
+            {group && context && (
+              <WorkloadPanel
+                context={context}
+                title={`${group.kind} ${group.name}`}
+                // Deployment pods: the random suffix tells them apart. StatefulSet pods: their number.
+                tag={(pod) => (group.kind === 'deployment' ? pod.slice(pod.lastIndexOf('-') + 1) : pod)}
+                pods={groupPods(group)}
+                onClose={() => setGroup(null)}
+              />
+            )}
             {panel && context && <PodPanel key={`${panel.pod.namespace}/${panel.pod.name}`} context={context} pod={panel.pod} tab={panel.tab} onTab={(t) => setPanel({ pod: panel.pod, tab: t })} onClose={() => setPanel(null)} />}
           </>
         )}
@@ -290,6 +328,7 @@ export function KubernetesPage() {
         }}
       />
       {forwarding && context && <ForwardDialog context={context} clusterName={here.label} target={forwarding} onClose={() => setForwarding(null)} />}
+      {history && context && <RolloutDialog context={context} clusterName={here.label} prod={prod} namespace={history.namespace} name={history.name} onRollback={act} onClose={() => setHistory(null)} />}
       {yamlOf && context && <YamlDialog context={context} target={yamlOf} onClose={() => setYamlOf(null)} />}
       {viewing && context && <DataDialog context={context} kind={viewing.kind} item={viewing.item} onClose={() => setViewing(null)} />}
       {pendingChange && (

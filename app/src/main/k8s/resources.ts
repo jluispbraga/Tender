@@ -1,5 +1,5 @@
 import * as k8s from '@kubernetes/client-node'
-import type { KubeAction, KubeData, KubeItem, KubeKind } from '../../renderer/src/api/types'
+import type { KubeAction, KubeData, KubeEvent, KubeItem, KubeKind, KubeRevision, KubeUsage } from '../../renderer/src/api/types'
 import { forContext, quick, reason } from './kube'
 
 // The kinds past pods, deployments and services: listed one tab at a time, so
@@ -133,7 +133,7 @@ export function manualJobName(cronJob: string, now = Date.now()): string {
   return cronJob.slice(0, 63 - suffix.length).replace(/-+$/, '') + suffix
 }
 
-type MoreAction = Extract<KubeAction, { kind: 'delete' | 'restart-statefulset' | 'run-cronjob' | 'scale-statefulset' | 'suspend-cronjob' }>
+type MoreAction = Extract<KubeAction, { kind: 'delete' | 'restart-statefulset' | 'run-cronjob' | 'scale-statefulset' | 'suspend-cronjob' | 'rollback-deployment' }>
 
 const singular: Record<KubeKind, string> = { statefulsets: 'StatefulSet', jobs: 'job', cronjobs: 'CronJob', ingresses: 'ingress', configmaps: 'ConfigMap', secrets: 'secret' }
 
@@ -146,6 +146,8 @@ export async function actMore(context: string, a: MoreAction): Promise<string> {
   const merge = k8s.setHeaderOptions('Content-Type', k8s.PatchStrategy.MergePatch)
   try {
     switch (a.kind) {
+      case 'rollback-deployment':
+        return await rollback(context, namespace, name, a.revision)
       case 'delete': {
         const core = kc.makeApiClient(k8s.CoreV1Api)
         const net = kc.makeApiClient(k8s.NetworkingV1Api)
@@ -255,4 +257,112 @@ export function dumpObject(kind: string, o: k8s.KubernetesObject & Record<string
   // it is instead of re-sorting it through its typed models, so those two go on top by hand.
   const { apiVersion, kind: k, metadata, ...rest } = obj
   return `apiVersion: ${apiVersion}\nkind: ${k}\n` + k8s.dumpYaml({ metadata, ...rest })
+}
+
+// ---- events, rollouts, usage -----------------------------------------------------------
+
+/** What happened in a namespace (or all), newest first: kubectl get events, the useful part. */
+export async function events(context: string, namespace: string): Promise<KubeEvent[]> {
+  const core = forContext(context).makeApiClient(k8s.CoreV1Api)
+  try {
+    const r = await quick(namespace === '*' ? core.listEventForAllNamespaces({ limit: 500 }) : core.listNamespacedEvent({ namespace, limit: 500 }), context)
+    return r.items
+      .map((e) => ({
+        type: e.type ?? 'Normal',
+        reason: e.reason ?? '',
+        message: (e.message ?? '').trim(),
+        kind: e.involvedObject?.kind ?? '',
+        name: e.involvedObject?.name ?? '',
+        namespace: e.involvedObject?.namespace ?? e.metadata?.namespace ?? '',
+        count: e.count ?? e.series?.count ?? 1,
+        lastSeen: iso(e.lastTimestamp ?? e.series?.lastObservedTime ?? e.eventTime ?? e.firstTimestamp ?? e.metadata?.creationTimestamp),
+      }))
+      .sort((a, b) => (b.lastSeen ?? '').localeCompare(a.lastSeen ?? ''))
+      .slice(0, 300)
+  } catch (e) {
+    throw new Error(reason(e))
+  }
+}
+
+/** A deployment's ReplicaSets, newest revision first: kubectl rollout history. */
+export async function rollouts(context: string, namespace: string, name: string): Promise<KubeRevision[]> {
+  const apps = forContext(context).makeApiClient(k8s.AppsV1Api)
+  try {
+    const d = await quick(apps.readNamespacedDeployment({ name, namespace }), context)
+    const selector = Object.entries(d.spec?.selector?.matchLabels ?? {})
+      .map(([k, v]) => `${k}=${v}`)
+      .join(',')
+    const rs = await quick(apps.listNamespacedReplicaSet({ namespace, labelSelector: selector }), context)
+    const current = d.metadata?.annotations?.['deployment.kubernetes.io/revision']
+    return rs.items
+      .filter((r) => r.metadata?.ownerReferences?.some((o) => o.uid === d.metadata?.uid))
+      .map((r) => {
+        const revision = Number(r.metadata?.annotations?.['deployment.kubernetes.io/revision'] ?? 0)
+        return {
+          revision,
+          current: String(revision) === current,
+          images: (r.spec?.template?.spec?.containers ?? []).map((c) => c.image ?? ''),
+          changeCause: r.metadata?.annotations?.['kubernetes.io/change-cause'],
+          createdAt: iso(r.metadata?.creationTimestamp),
+          pods: r.status?.replicas ?? 0,
+        }
+      })
+      .sort((a, b) => b.revision - a.revision)
+  } catch (e) {
+    throw new Error(reason(e))
+  }
+}
+
+/** kubectl rollout undo --to-revision: the deployment takes that ReplicaSet's pod template back. */
+export async function rollback(context: string, namespace: string, name: string, revision: number): Promise<string> {
+  const apps = forContext(context).makeApiClient(k8s.AppsV1Api)
+  try {
+    const d = await quick(apps.readNamespacedDeployment({ name, namespace }), context)
+    const rs = await quick(apps.listNamespacedReplicaSet({ namespace }), context)
+    const target = rs.items.find((r) => r.metadata?.ownerReferences?.some((o) => o.uid === d.metadata?.uid) && r.metadata?.annotations?.['deployment.kubernetes.io/revision'] === String(revision))
+    if (!target?.spec?.template) throw new Error(`${name} has no revision ${revision} any more.`)
+    const template = JSON.parse(JSON.stringify(target.spec.template)) as k8s.V1PodTemplateSpec
+    // The ReplicaSet's own label; the deployment adds the right one itself.
+    if (template.metadata?.labels) delete template.metadata.labels['pod-template-hash']
+    await quick(apps.patchNamespacedDeployment({ name, namespace, body: [{ op: 'replace', path: '/spec/template', value: template }] }, k8s.setHeaderOptions('Content-Type', k8s.PatchStrategy.JsonPatch)), context)
+    return `Rolling ${name} back to revision ${revision}: ${(template.spec?.containers ?? []).map((c) => c.image).join(', ')}.`
+  } catch (e) {
+    throw new Error(reason(e))
+  }
+}
+
+/** "250m" or "123456789n" → millicores. */
+export function cpuMilli(q: string): number {
+  const m = /^([\d.]+)([numk]?)$/.exec(q.trim())
+  if (!m) return 0
+  const v = Number(m[1])
+  return { n: v / 1e6, u: v / 1e3, m: v, k: v * 1e6, '': v * 1000 }[m[2] as 'n' | 'u' | 'm' | 'k' | '']
+}
+
+/** "34Mi", "1Gi", "512000Ki", "1048576" → bytes. */
+export function memBytes(q: string): number {
+  const m = /^([\d.]+)([KMGTP]i?|[kmgtp]?)$/.exec(q.trim())
+  if (!m) return 0
+  const pow: Record<string, number> = { '': 1, k: 1e3, K: 1e3, M: 1e6, G: 1e9, T: 1e12, P: 1e15, Ki: 2 ** 10, Mi: 2 ** 20, Gi: 2 ** 30, Ti: 2 ** 40, Pi: 2 ** 50 }
+  return Number(m[1]) * (pow[m[2]] ?? 1)
+}
+
+/** CPU and memory per pod from metrics-server; null when the cluster has none. */
+export async function podUsage(context: string, namespace: string): Promise<KubeUsage | null> {
+  const metrics = new k8s.Metrics(forContext(context))
+  try {
+    const r = await quick(metrics.getPodMetrics(namespace === '*' ? undefined : namespace), context)
+    const out: KubeUsage = {}
+    for (const p of r.items) {
+      out[`${p.metadata.namespace}/${p.metadata.name}`] = {
+        cpuMilli: Math.round(p.containers.reduce((n, c) => n + cpuMilli(c.usage.cpu), 0)),
+        memoryBytes: p.containers.reduce((n, c) => n + memBytes(c.usage.memory), 0),
+      }
+    }
+    return out
+  } catch {
+    // No metrics-server, or one still starting (it answers 404/503 or plain text for a
+    // minute): no numbers, not an error. A cluster that is down shows on the rest of the page.
+    return null
+  }
 }

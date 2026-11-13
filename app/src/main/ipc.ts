@@ -91,13 +91,17 @@ export function registerIpc(deps: IpcDeps) {
           z.object({ kind: z.enum(['restart-statefulset', 'run-cronjob']), namespace: kubeName, name: kubeName }),
           z.object({ kind: z.literal('scale-statefulset'), namespace: kubeName, name: kubeName, replicas: z.number().int().min(0).max(100) }),
           z.object({ kind: z.literal('suspend-cronjob'), namespace: kubeName, name: kubeName, suspend: z.boolean() }),
+          z.object({ kind: z.literal('rollback-deployment'), namespace: kubeName, name: kubeName, revision: z.number().int().min(1) }),
         ]),
       ]),
       run: ([c, a]) =>
-        a.kind === 'delete' || a.kind === 'restart-statefulset' || a.kind === 'run-cronjob' || a.kind === 'scale-statefulset' || a.kind === 'suspend-cronjob' ? kubeMore.actMore(c, a) : kube.act(c, a),
+        a.kind === 'delete' || a.kind === 'rollback-deployment' || a.kind === 'restart-statefulset' || a.kind === 'run-cronjob' || a.kind === 'scale-statefulset' || a.kind === 'suspend-cronjob' ? kubeMore.actMore(c, a) : kube.act(c, a),
     },
     'kube.list': { args: z.tuple([kubeName, kubeName, kubeKind]), run: ([c, n, k]) => kubeMore.list(c, n, k) },
     'kube.yaml': { args: z.tuple([kubeName, z.enum(['pods', 'deployments', 'services', 'statefulsets', 'jobs', 'cronjobs', 'ingresses', 'configmaps', 'secrets']), kubeName, kubeName]), run: ([c, k, n, name]) => kubeMore.yaml(c, k, n, name) },
+    'kube.events': { args: z.tuple([kubeName, kubeName]), run: ([c, n]) => kubeMore.events(c, n) },
+    'kube.rollouts': { args: z.tuple([kubeName, kubeName, kubeName]), run: ([c, n, name]) => kubeMore.rollouts(c, n, name) },
+    'kube.usage': { args: z.tuple([kubeName, kubeName]), run: ([c, n]) => kubeMore.podUsage(c, n) },
     'kube.data': { args: z.tuple([kubeName, kubeName, z.enum(['configmaps', 'secrets']), kubeName]), run: ([c, n, k, name]) => kubeMore.data(c, n, k, name) },
     'resources.status': { args: z.tuple([]), run: () => resources.status(engine) },
     'resources.act': {

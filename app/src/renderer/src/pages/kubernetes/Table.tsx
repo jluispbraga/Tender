@@ -8,7 +8,7 @@ export function Table({ label, head, rows, filter, problemsOnly }: { label: stri
       <thead>
         <tr className="border-b border-line text-left text-muted">
           {head.map((h, i) => (
-            <th key={i} scope="col" className="px-3 py-2 font-medium">
+            <th key={i} scope="col" className="px-2.5 py-2 font-medium">
               {h || <span className="sr-only">Actions</span>}
             </th>
           ))}
@@ -18,7 +18,7 @@ export function Table({ label, head, rows, filter, problemsOnly }: { label: stri
         {rows.map((r, i) => (
           <tr key={i} className="border-b border-line">
             {r.map((cell, j) => (
-              <td key={j} className="px-3 py-1.5 text-fg">
+              <td key={j} className="px-2.5 py-1.5 text-fg">
                 {cell}
               </td>
             ))}

@@ -32,8 +32,10 @@ export function TimeSeries({ times, series, format, height = 140 }: { times: num
       series: [{}, ...series.map((s) => ({ label: s.label, stroke: css(s.color), width: 1.5, points: { show: false } }))],
     }
     plot.current = new uPlot(opts, [times.map((t) => t / 1000), ...series.map((s) => s.values)], host.current)
-    const ro = new ResizeObserver(() => plot.current?.setSize({ width: host.current!.clientWidth, height }))
-    ro.observe(host.current)
+    // A resize can be queued when the page closes: use this element, not the ref, which is null by then.
+    const el = host.current
+    const ro = new ResizeObserver(() => plot.current?.setSize({ width: el.clientWidth, height }))
+    ro.observe(el)
     return () => {
       ro.disconnect()
       plot.current?.destroy()

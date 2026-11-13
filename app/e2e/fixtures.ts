@@ -23,10 +23,12 @@ export const test = base.extend<Fixtures>({
     await use(async (hash: string) => {
       await page.goto('/' + hash)
       await expect(page.getByText('Engine running')).toBeVisible()
+      await pageLoaded(page)
     })
   },
   scan: async ({ page }, use) => {
     await use(async (screen: string) => {
+      await pageLoaded(page)
       // xterm's hidden helper textarea and canvases aren't ours to fix.
       const r = await new AxeBuilder({ page }).exclude('.xterm-helper-textarea').exclude('.xterm-accessibility').analyze()
       const v = r.violations.map((x) => `${screen}: ${x.id} (${x.impact}) ×${x.nodes.length}: ${x.nodes[0]?.target.join(' ')}`)
@@ -36,6 +38,9 @@ export const test = base.extend<Fixtures>({
 })
 
 export { expect }
+
+/** Pages load their code the first time they open: wait until the page itself is there. */
+const pageLoaded = (page: Page) => expect(page.locator('[data-page-loading]')).toHaveCount(0)
 
 /** The fake engine's test hook (only exists in the browser build). */
 export const setEngine = (page: Page, state: 'running' | 'stopped' | 'error', error?: string, repair?: string, wslStuck?: boolean) =>
