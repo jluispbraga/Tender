@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Cable, Eye, Info, Loader2, Pencil, RefreshCw, RotateCw, Scale, Ship, SquareTerminal, Trash2 } from 'lucide-react'
-import { api, type KubeAction, type KubeOverview } from '@/api'
+import { api, type KubeAction, type KubeItem, type KubeKind, type KubeOverview } from '@/api'
 import { PageHeader } from '@/app/AppShell'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog, Modal } from '@/components/ui/dialog'
@@ -16,23 +16,29 @@ import { setSetting, useSettings } from '@/lib/queries'
 import { href } from '@/lib/router'
 import { ClusterLabelDialog, EnvBadge, clusterLabel, optionText } from './ClusterLabel'
 import { ForwardDialog, ForwardsBar, type ForwardTarget } from './Forwards'
+import { DataDialog, MoreKinds, kindLabel, type ChangeRequest, type DeleteRequest, type ScaleRequest } from './MoreKinds'
 import { PodPanel, type PodTab } from './PodPanel'
+import { Table } from './Table'
 
 type Pod = KubeOverview['pods'][number]
-type Deployment = KubeOverview['deployments'][number]
-type Kind = 'pod' | 'deployment' | 'service'
+type Tab = 'pods' | 'deployments' | 'services' | KubeKind
+const tabs: Tab[] = ['pods', 'deployments', 'services', 'statefulsets', 'jobs', 'cronjobs', 'ingresses', 'configmaps', 'secrets']
+const tabLabel = (t: Tab) => (t === 'pods' ? 'Pods' : t === 'deployments' ? 'Deployments' : t === 'services' ? 'Services' : kindLabel[t])
+const isMore = (t: Tab): t is KubeKind => !['pods', 'deployments', 'services'].includes(t)
 
 /** The clusters in the kubeconfig: pods, deployments, services, pod logs, and restart, scale, delete. */
 export function KubernetesPage() {
   const toast = useToast()
-  const [pendingDelete, setPendingDelete] = useState<{ kind: Kind; namespace: string; name: string } | null>(null)
-  const [scaling, setScaling] = useState<Deployment | null>(null)
+  const queryClient = useQueryClient()
+  const [pendingDelete, setPendingDelete] = useState<DeleteRequest | null>(null)
+  const [scaling, setScaling] = useState<ScaleRequest | null>(null)
+  const [viewing, setViewing] = useState<{ kind: 'configmaps' | 'secrets'; item: KubeItem } | null>(null)
   // Re-read every few seconds so a kubeconfig dropped into an added folder (or edited) shows up on its own.
   const contexts = useQuery({ queryKey: ['kube', 'contexts'], queryFn: () => api.kube.contexts(), refetchInterval: 10_000 })
   const problem = useQuery({ queryKey: ['kube', 'problem'], queryFn: () => api.kube.configProblem(), enabled: contexts.data?.length === 0 })
   const [ctx, setCtx] = useState<string | null>(null)
   const [ns, setNs] = useState<string>('*')
-  const [tab, setTab] = useState<'pods' | 'deployments' | 'services'>('pods')
+  const [tab, setTab] = useState<Tab>('pods')
   const [panel, setPanel] = useState<{ pod: Pod; tab: PodTab } | null>(null)
   const [forwarding, setForwarding] = useState<ForwardTarget | null>(null)
   const context = ctx ?? contexts.data?.find((c) => c.current)?.name ?? contexts.data?.[0]?.name ?? null
@@ -42,7 +48,7 @@ export function KubernetesPage() {
   const here = clusterLabel(current, labels)
   const prod = here.env === 'prod'
   const [naming, setNaming] = useState(false)
-  const [pendingRestart, setPendingRestart] = useState<Deployment | null>(null)
+  const [pendingChange, setPendingChange] = useState<ChangeRequest | null>(null)
 
   const namespaces = useQuery({ queryKey: ['kube', 'ns', context], queryFn: () => api.kube.namespaces(context!), enabled: !!context, retry: false })
   const overview = useQuery({ queryKey: ['kube', 'overview', context, ns], queryFn: () => api.kube.overview(context!, ns), enabled: !!context, refetchInterval: 5000, retry: false })
@@ -55,7 +61,10 @@ export function KubernetesPage() {
       toast({ kind: 'error', title: 'Kubernetes refused that', body: (e as Error).message })
     }
     void overview.refetch()
+    void queryClient.invalidateQueries({ queryKey: ['kube', 'list', context] })
   }
+  // In production every change asks first; elsewhere only deletes do.
+  const change = (r: ChangeRequest) => (prod ? setPendingChange(r) : void act(r.action))
 
   if (contexts.data && !contexts.data.length) {
     const p = problem.data
@@ -88,7 +97,7 @@ export function KubernetesPage() {
   }
 
   const data = overview.data
-  const counts = { pods: data?.pods.length, deployments: data?.deployments.length, services: data?.services.length }
+  const counts: Partial<Record<Tab, number>> = { pods: data?.pods.length, deployments: data?.deployments.length, services: data?.services.length }
 
   return (
     <>
@@ -113,7 +122,7 @@ export function KubernetesPage() {
         <a href={href('settings', 'general')} className="text-sm text-accent hover:underline">
           Kubeconfig files
         </a>
-        <Button icon={<RotateCw />} loading={overview.isFetching || contexts.isFetching} onClick={() => (void contexts.refetch(), void namespaces.refetch(), void overview.refetch())}>
+        <Button icon={<RotateCw />} loading={overview.isFetching || contexts.isFetching} onClick={() => (void contexts.refetch(), void namespaces.refetch(), void overview.refetch(), void queryClient.invalidateQueries({ queryKey: ['kube', 'list'] }))}>
           Refresh
         </Button>
       </PageHeader>
@@ -136,10 +145,10 @@ export function KubernetesPage() {
           </p>
         ) : (
           <>
-            <div role="tablist" aria-label="Kind" className="flex shrink-0 gap-1 border-b border-line px-4">
-              {(['pods', 'deployments', 'services'] as const).map((t) => (
-                <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={cn('-mb-px border-b-2 px-3 py-2 text-sm capitalize', tab === t ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg')}>
-                  {t} <span className="text-muted tabular-nums">{counts[t]}</span>
+            <div role="tablist" aria-label="Kind" className="flex shrink-0 flex-wrap gap-x-1 border-b border-line px-4">
+              {tabs.map((t) => (
+                <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={cn('-mb-px shrink-0 border-b-2 px-3 py-2 text-sm whitespace-nowrap', tab === t ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg')}>
+                  {tabLabel(t)} {counts[t] !== undefined && <span className="text-muted tabular-nums">{counts[t]}</span>}
                 </button>
               ))}
             </div>
@@ -165,7 +174,7 @@ export function KubernetesPage() {
                         { label: 'Open a terminal', icon: <SquareTerminal />, onSelect: () => setPanel({ pod: p, tab: 'terminal' }) },
                         { label: 'Forward a port…', icon: <Cable />, onSelect: () => setForwarding({ kind: 'pod', namespace: p.namespace, name: p.name, ports: p.ports }) },
                         { kind: 'separator' },
-                        { label: 'Delete pod', icon: <Trash2 />, danger: true, onSelect: () => setPendingDelete({ kind: 'pod', namespace: p.namespace, name: p.name }) },
+                        { label: 'Delete pod', icon: <Trash2 />, danger: true, onSelect: () => setPendingDelete({ what: 'pod', namespace: p.namespace, name: p.name, impact: 'If a deployment owns it, Kubernetes starts a new pod in its place.', action: { kind: 'delete-pod', namespace: p.namespace, name: p.name } }) },
                       ]}
                     />,
                   ])}
@@ -184,10 +193,10 @@ export function KubernetesPage() {
                     <ActionsMenu
                       label={`Actions for ${d.name}`}
                       entries={[
-                        { label: 'Restart', icon: <RefreshCw />, onSelect: () => (prod ? setPendingRestart(d) : void act({ kind: 'restart-deployment', namespace: d.namespace, name: d.name })) },
-                        { label: 'Scale…', icon: <Scale />, onSelect: () => setScaling(d) },
+                        { label: 'Restart', icon: <RefreshCw />, onSelect: () => change({ title: `Restart ${d.name} in production?`, description: `New pods replace the old ones one by one in ${here.label} / ${d.namespace}.`, label: 'Restart', action: { kind: 'restart-deployment', namespace: d.namespace, name: d.name } }) },
+                        { label: 'Scale…', icon: <Scale />, onSelect: () => setScaling({ what: 'deployment', name: d.name, namespace: d.namespace, ready: d.ready, replicas: d.replicas, to: (n) => ({ kind: 'scale-deployment', namespace: d.namespace, name: d.name, replicas: n }) }) },
                         { kind: 'separator' },
-                        { label: 'Delete deployment', icon: <Trash2 />, danger: true, onSelect: () => setPendingDelete({ kind: 'deployment', namespace: d.namespace, name: d.name }) },
+                        { label: 'Delete deployment', icon: <Trash2 />, danger: true, onSelect: () => setPendingDelete({ what: 'deployment', namespace: d.namespace, name: d.name, impact: 'Its pods stop and are removed too.', action: { kind: 'delete-deployment', namespace: d.namespace, name: d.name } }) },
                       ]}
                     />,
                   ])}
@@ -208,10 +217,22 @@ export function KubernetesPage() {
                       entries={[
                         { label: 'Forward a port…', icon: <Cable />, onSelect: () => setForwarding({ kind: 'service', namespace: s.namespace, name: s.name, ports: s.portNumbers }) },
                         { kind: 'separator' },
-                        { label: 'Delete service', icon: <Trash2 />, danger: true, onSelect: () => setPendingDelete({ kind: 'service', namespace: s.namespace, name: s.name }) },
+                        { label: 'Delete service', icon: <Trash2 />, danger: true, onSelect: () => setPendingDelete({ what: 'service', namespace: s.namespace, name: s.name, impact: 'Pods behind it keep running, but nothing reaches them through this service.', action: { kind: 'delete-service', namespace: s.namespace, name: s.name } }) },
                       ]}
                     />,
                   ])}
+                />
+              )}
+              {isMore(tab) && context && (
+                <MoreKinds
+                  context={context}
+                  namespace={ns}
+                  kind={tab}
+                  clusterName={here.label}
+                  onDelete={setPendingDelete}
+                  onChange={change}
+                  onScale={setScaling}
+                  onView={(item) => setViewing({ kind: tab === 'secrets' ? 'secrets' : 'configmaps', item })}
                 />
               )}
             </div>
@@ -222,43 +243,37 @@ export function KubernetesPage() {
       <ConfirmDialog
         open={!!pendingDelete}
         onOpenChange={(o) => !o && setPendingDelete(null)}
-        title={`Delete ${pendingDelete?.kind} ${pendingDelete?.name}?`}
+        title={`Delete ${pendingDelete?.what} ${pendingDelete?.name}?`}
         items={pendingDelete ? [`${here.label} / ${pendingDelete.namespace} / ${pendingDelete.name}`] : []}
         typeToConfirm={prod ? pendingDelete?.name : undefined}
-        impact={
-          pendingDelete?.kind === 'pod'
-            ? 'If a deployment owns it, Kubernetes starts a new pod in its place.'
-            : pendingDelete?.kind === 'deployment'
-              ? 'Its pods stop and are removed too.'
-              : 'Pods behind it keep running, but nothing reaches them through this service.'
-        }
-        confirmLabel={`Delete ${pendingDelete?.kind}`}
+        impact={pendingDelete?.impact}
+        confirmLabel={`Delete ${pendingDelete?.what}`}
         onConfirm={async () => {
-          const p = pendingDelete!
-          await act({ kind: `delete-${p.kind}`, namespace: p.namespace, name: p.name })
+          await act(pendingDelete!.action)
           setPendingDelete(null)
         }}
       />
       {forwarding && context && <ForwardDialog context={context} clusterName={here.label} target={forwarding} onClose={() => setForwarding(null)} />}
-      {pendingRestart && (
+      {viewing && context && <DataDialog context={context} kind={viewing.kind} item={viewing.item} onClose={() => setViewing(null)} />}
+      {pendingChange && (
         <Modal
           open
-          onOpenChange={(o) => !o && setPendingRestart(null)}
-          title={`Restart ${pendingRestart.name} in production?`}
-          description={`New pods replace the old ones one by one in ${here.label} / ${pendingRestart.namespace}.`}
+          onOpenChange={(o) => !o && setPendingChange(null)}
+          title={pendingChange.title}
+          description={pendingChange.description}
           size="sm"
           footer={
             <>
-              <Button onClick={() => setPendingRestart(null)}>Cancel</Button>
+              <Button onClick={() => setPendingChange(null)}>Cancel</Button>
               <Button
                 variant="danger"
                 onClick={() => {
-                  const d = pendingRestart
-                  setPendingRestart(null)
-                  void act({ kind: 'restart-deployment', namespace: d.namespace, name: d.name })
+                  const r = pendingChange
+                  setPendingChange(null)
+                  void act(r.action)
                 }}
               >
-                Restart
+                {pendingChange.label}
               </Button>
             </>
           }
@@ -278,12 +293,12 @@ export function KubernetesPage() {
           }}
         />
       )}
-      {scaling && <ScaleDialog prod={prod} clusterName={here.label} deployment={scaling} onClose={() => setScaling(null)} onScale={(replicas) => act({ kind: 'scale-deployment', namespace: scaling.namespace, name: scaling.name, replicas })} />}
+      {scaling && <ScaleDialog prod={prod} clusterName={here.label} target={scaling} onClose={() => setScaling(null)} onScale={(replicas) => act(scaling.to(replicas))} />}
     </>
   )
 }
 
-function ScaleDialog({ deployment, prod, clusterName, onClose, onScale }: { deployment: Deployment; prod: boolean; clusterName: string; onClose: () => void; onScale: (replicas: number) => Promise<void> }) {
+function ScaleDialog({ target: deployment, prod, clusterName, onClose, onScale }: { target: ScaleRequest; prod: boolean; clusterName: string; onClose: () => void; onScale: (replicas: number) => Promise<void> }) {
   const [value, setValue] = useState(String(deployment.replicas))
   const [busy, setBusy] = useState(false)
   const n = Number(value)
@@ -299,7 +314,7 @@ function ScaleDialog({ deployment, prod, clusterName, onClose, onScale }: { depl
       open
       onOpenChange={(o) => !o && !busy && onClose()}
       title={prod ? `Scale ${deployment.name} in production` : `Scale ${deployment.name}`}
-      description={`${clusterName} / ${deployment.namespace}. Ready now: ${deployment.ready}. 0 stops every pod and keeps the deployment.`}
+      description={`${clusterName} / ${deployment.namespace}. Ready now: ${deployment.ready}. 0 stops every pod and keeps the ${deployment.what}.`}
       size="sm"
       footer={
         <>
@@ -316,33 +331,5 @@ function ScaleDialog({ deployment, prod, clusterName, onClose, onScale }: { depl
         <Input label="Pods" type="number" min={0} max={100} value={value} onChange={(e) => setValue(e.target.value)} error={error} autoFocus />
       </form>
     </Modal>
-  )
-}
-
-function Table({ label, head, rows }: { label: string; head: string[]; rows: React.ReactNode[][] }) {
-  if (!rows.length) return <p className="p-6 text-sm text-muted">No {label.toLowerCase()} here.</p>
-  return (
-    <table aria-label={label} className="w-full border-collapse text-sm">
-      <thead>
-        <tr className="border-b border-line text-left text-muted">
-          {head.map((h, i) => (
-            <th key={i} scope="col" className="px-4 py-2 font-medium">
-              {h || <span className="sr-only">Actions</span>}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r, i) => (
-          <tr key={i} className="border-b border-line">
-            {r.map((cell, j) => (
-              <td key={j} className="px-4 py-1.5 text-fg">
-                {cell}
-              </td>
-            ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
   )
 }

@@ -73,4 +73,33 @@ test.describe('F01 read a container’s logs', () => {
     await page.getByRole('button', { name: 'Back to containers' }).click()
     await expect(page).toHaveURL(/#\/containers$/)
   })
+
+  test('F01-E7 only matching lines, pause, and save to a file', async ({ page, open }) => {
+    await open('#/containers/b7c2e9f0a1b2c3d4/logs')
+    const log = page.getByRole('log')
+    await expect(log).toContainText('listening')
+    // Stop scrolling holds the view; new lines keep arriving below.
+    await page.getByRole('button', { name: 'Stop scrolling' }).click()
+    await expect(page.getByRole('button', { name: 'Follow new lines' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Jump to latest' })).toBeVisible()
+    await page.getByRole('button', { name: 'Follow new lines' }).click()
+    await expect(page.getByRole('button', { name: 'Stop scrolling' })).toBeVisible()
+    const only = page.getByRole('button', { name: 'Matching lines only' })
+    await expect(only).toBeDisabled()
+    await page.getByRole('searchbox', { name: 'Search logs' }).fill('slow query')
+    await only.click()
+    await expect(only).toHaveAttribute('aria-pressed', 'true')
+    const lines = log.locator('[data-line]')
+    await expect.poll(() => lines.count()).toBeGreaterThan(0)
+    for (const t of await lines.allInnerTexts()) expect(t.toLowerCase()).toContain('slow query')
+    await only.click()
+    const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Save logs to a file' }).click()])
+    expect(download.suggestedFilename()).toMatch(/\.log$/)
+    const body = await download.createReadStream().then(async (st) => {
+      let s = ''
+      for await (const c of st) s += c
+      return s
+    })
+    expect(body).toContain('listening')
+  })
 })

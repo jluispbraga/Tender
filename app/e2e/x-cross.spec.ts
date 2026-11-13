@@ -18,7 +18,7 @@ test.describe('cross-cutting', () => {
 
   test('X3 the minimum window has no horizontal scroll', async ({ page, open }) => {
     await page.setViewportSize({ width: 960, height: 640 })
-    for (const hash of ['#/containers', '#/images', '#/volumes', '#/projects/shop']) {
+    for (const hash of ['#/containers', '#/images', '#/volumes', '#/projects/shop', '#/containers/b7c2e9f0a1b2c3d4/logs', '#/kubernetes']) {
       await open(hash)
       await page.waitForTimeout(300)
       const overflow = await page.evaluate(() => [...document.querySelectorAll('main *')].some((el) => el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflowX !== 'hidden' && el.tagName === 'DIV' && getComputedStyle(el).overflowX !== 'visible'))

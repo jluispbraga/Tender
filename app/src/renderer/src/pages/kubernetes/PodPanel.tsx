@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { ago } from '@/lib/format'
 import { cn } from '@/lib/cn'
+import { LogViewer, type LogLine } from '@/components/ui/log-viewer'
 
 type Pod = KubeOverview['pods'][number]
 export type PodTab = 'logs' | 'details' | 'terminal'
@@ -43,40 +44,44 @@ export function PodPanel({ context, pod, tab, onTab, onClose }: { context: strin
   )
 }
 
+const MAX_LINES = 5000
+
+/** "2024-05-01T10:00:00.123456789Z message", as the API sends it with timestamps on. */
+export function podLogLine(raw: string): LogLine {
+  const m = /^(\d{4}-\d\d-\d\dT[\d:.]+Z) (.*)$/s.exec(raw)
+  return m ? { ts: m[1], stream: 'stdout', text: m[2] } : { ts: '', stream: 'stdout', text: raw }
+}
+
 function PodLogs({ context, pod, container }: { context: string; pod: Pod; container: string }) {
-  const [lines, setLines] = useState<string[]>([])
+  const [lines, setLines] = useState<LogLine[]>([])
   const [error, setError] = useState<string | null>(null)
   // A crashing pod's current log is usually empty; why it crashed is in the run before.
   const crashing = pod.restarts > 0 && !/^Running$|^Completed$|^Succeeded$/.test(pod.status)
   const [previous, setPrevious] = useState(crashing)
-  const box = useRef<HTMLPreElement>(null)
   useEffect(() => {
     setLines([])
     setError(null)
-    return api.kube.logs(context, pod.namespace, pod.name, container, (e) => (e.type === 'lines' ? setLines((ls) => [...ls, ...e.lines].slice(-2000)) : setError(e.message)), { previous })
+    return api.kube.logs(context, pod.namespace, pod.name, container, (e) => (e.type === 'lines' ? setLines((ls) => [...ls, ...e.lines.map(podLogLine)].slice(-MAX_LINES)) : setError(e.message)), { previous })
   }, [context, pod.namespace, pod.name, container, previous])
-  useEffect(() => {
-    if (box.current) box.current.scrollTop = box.current.scrollHeight
-  }, [lines])
-  return (
+  const which = (
     <>
-      <div className="flex shrink-0 items-center gap-3 px-4 py-1.5 text-sm">
-        {pod.restarts > 0 && (
-          <div role="radiogroup" aria-label="Which run" className="inline-flex rounded-md border border-line p-0.5">
-            {([false, true] as const).map((p) => (
-              <button key={String(p)} role="radio" aria-checked={previous === p} onClick={() => setPrevious(p)} className={cn('rounded px-2 py-0.5 text-xs', previous === p ? 'bg-selected font-medium text-fg' : 'text-muted hover:text-fg')}>
-                {p ? 'Before the last restart' : 'Current run'}
-              </button>
-            ))}
-          </div>
-        )}
-        <span className="text-muted">{previous ? `last 500 lines before restart ${pod.restarts}` : 'following the last 500 lines'}</span>
-      </div>
-      {error && <p className="mx-4 mb-1 rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">{error}</p>}
-      <pre ref={box} tabIndex={0} aria-label="Log lines" className="min-h-0 flex-1 overflow-auto bg-term-bg px-4 py-2 font-mono text-xs whitespace-pre-wrap text-term-text">
-        {lines.join('\n')}
-      </pre>
+      {pod.restarts > 0 && (
+        <div role="radiogroup" aria-label="Which run" className="inline-flex rounded-md border border-line p-0.5">
+          {([false, true] as const).map((p) => (
+            <button key={String(p)} role="radio" aria-checked={previous === p} onClick={() => setPrevious(p)} className={cn('rounded px-2 py-0.5 text-xs', previous === p ? 'bg-selected font-medium text-fg' : 'text-muted hover:text-fg')}>
+              {p ? 'Before the last restart' : 'Current run'}
+            </button>
+          ))}
+        </div>
+      )}
+      <span className="text-xs text-muted">{previous ? `before restart ${pod.restarts}` : 'last 1,000 lines, then live'}</span>
     </>
+  )
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {error && <p className="mx-4 my-1 rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">{error}</p>}
+      <LogViewer label={`Logs of ${pod.name}`} fileName={`${pod.name}-${container}${previous ? '-previous' : ''}`} lines={lines} toolbar={which} />
+    </div>
   )
 }
 

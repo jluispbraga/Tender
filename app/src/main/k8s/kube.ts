@@ -334,7 +334,7 @@ export function followLogs(context: string, namespace: string, pod: string, cont
   })
   let abort: AbortController | null = null
   new k8s.Log(forContext(context))
-    .log(namespace, pod, container, out, { follow: !previous, previous, tailLines: tail, timestamps: false })
+    .log(namespace, pod, container, out, { follow: !previous, previous, tailLines: tail, timestamps: true })
     .then((a) => {
       abort = a
       if (stopped) a.abort()
@@ -352,7 +352,7 @@ export function followLogs(context: string, namespace: string, pod: string, cont
 }
 
 /** Restarts, scales or deletes one object, like the matching kubectl command. Returns what happened. */
-export async function act(context: string, a: KubeAction): Promise<string> {
+export async function act(context: string, a: Extract<KubeAction, { kind: 'delete-pod' | 'delete-deployment' | 'delete-service' | 'restart-deployment' | 'scale-deployment' }>): Promise<string> {
   const kc = forContext(context)
   const core = kc.makeApiClient(k8s.CoreV1Api)
   const apps = kc.makeApiClient(k8s.AppsV1Api)

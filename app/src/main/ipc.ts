@@ -10,6 +10,7 @@ import * as doctor from './tools/doctor'
 import * as resources from './tools/resources'
 import * as kube from './k8s/kube'
 import * as podTools from './k8s/pod-tools'
+import * as kubeMore from './k8s/resources'
 import { settingValue } from './settings-schema'
 import * as updates from './updates'
 import type { PipeShare } from './tools/windows-tools'
@@ -25,6 +26,7 @@ const id = z.string().min(1).max(200)
 const ids = z.array(id).min(1).max(500)
 // Kubernetes context, namespace, pod and container names ('*': every namespace).
 const kubeName = z.string().min(1).max(253)
+const kubeKind = z.enum(['statefulsets', 'jobs', 'cronjobs', 'ingresses', 'configmaps', 'secrets'])
 // WSL distribution names: letters, digits, dot, dash, underscore (they end up on a command line).
 const distro = z.string().regex(/^[A-Za-z0-9._-]{1,64}$/, 'Not a WSL distribution name.')
 const action = z.enum(['start', 'stop', 'restart', 'pause', 'unpause'])
@@ -85,10 +87,17 @@ export function registerIpc(deps: IpcDeps) {
         z.discriminatedUnion('kind', [
           z.object({ kind: z.enum(['delete-pod', 'delete-deployment', 'delete-service', 'restart-deployment']), namespace: kubeName, name: kubeName }),
           z.object({ kind: z.literal('scale-deployment'), namespace: kubeName, name: kubeName, replicas: z.number().int().min(0).max(100) }),
+          z.object({ kind: z.literal('delete'), resource: kubeKind, namespace: kubeName, name: kubeName }),
+          z.object({ kind: z.enum(['restart-statefulset', 'run-cronjob']), namespace: kubeName, name: kubeName }),
+          z.object({ kind: z.literal('scale-statefulset'), namespace: kubeName, name: kubeName, replicas: z.number().int().min(0).max(100) }),
+          z.object({ kind: z.literal('suspend-cronjob'), namespace: kubeName, name: kubeName, suspend: z.boolean() }),
         ]),
       ]),
-      run: ([c, a]) => kube.act(c, a),
+      run: ([c, a]) =>
+        a.kind === 'delete' || a.kind === 'restart-statefulset' || a.kind === 'run-cronjob' || a.kind === 'scale-statefulset' || a.kind === 'suspend-cronjob' ? kubeMore.actMore(c, a) : kube.act(c, a),
     },
+    'kube.list': { args: z.tuple([kubeName, kubeName, kubeKind]), run: ([c, n, k]) => kubeMore.list(c, n, k) },
+    'kube.data': { args: z.tuple([kubeName, kubeName, z.enum(['configmaps', 'secrets']), kubeName]), run: ([c, n, k, name]) => kubeMore.data(c, n, k, name) },
     'resources.status': { args: z.tuple([]), run: () => resources.status(engine) },
     'resources.act': {
       args: z.tuple([
@@ -282,7 +291,7 @@ export function registerIpc(deps: IpcDeps) {
           break
         }
         case 'kubeLogs':
-          stop = kube.followLogs(a[0], a[1], a[2], a[3], 500, (lines) => to({ type: 'lines', lines }), (message) => to({ type: 'error', message }), a[4])
+          stop = kube.followLogs(a[0], a[1], a[2], a[3], 1000, (lines) => to({ type: 'lines', lines }), (message) => to({ type: 'error', message }), a[4])
           break
         case 'kubeExec': {
           exec = await podTools.openExec(a[0], a[1], a[2], a[3], a[4], a[5], a[6], (d) => to({ type: 'data', data: d }), (code) => to({ type: 'exit', code }))

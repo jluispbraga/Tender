@@ -338,6 +338,10 @@ export interface TenderApi {
     openForward(id: string): Promise<void>
     /** Restarts, scales or deletes one object; resolves with what happened. */
     act(context: string, action: KubeAction): Promise<string>
+    /** StatefulSets, jobs, cronjobs, ingresses, configmaps or secrets of one namespace, or of all ('*'). */
+    list(context: string, namespace: string, kind: KubeKind): Promise<KubeItem[]>
+    /** The keys of a ConfigMap (with values) or a Secret (names and sizes only). */
+    data(context: string, namespace: string, kind: 'configmaps' | 'secrets', name: string): Promise<KubeData>
   }
   /** Windows: WSL's memory and disks, and the settings that keep them in check. */
   resources: {
@@ -431,6 +435,32 @@ export interface KubeForward {
 export type KubeAction =
   | { kind: 'delete-pod' | 'delete-deployment' | 'delete-service' | 'restart-deployment'; namespace: string; name: string }
   | { kind: 'scale-deployment'; namespace: string; name: string; replicas: number }
+  | { kind: 'delete'; resource: KubeKind; namespace: string; name: string }
+  | { kind: 'restart-statefulset' | 'run-cronjob'; namespace: string; name: string }
+  | { kind: 'scale-statefulset'; namespace: string; name: string; replicas: number }
+  | { kind: 'suspend-cronjob'; namespace: string; name: string; suspend: boolean }
+
+/** The kinds listed on demand, one tab at a time (pods, deployments and services come with the overview). */
+export type KubeKind = 'statefulsets' | 'jobs' | 'cronjobs' | 'ingresses' | 'configmaps' | 'secrets'
+
+export interface KubeItem {
+  name: string
+  namespace: string
+  createdAt?: string
+  /** The columns of that kind's table, already formatted. */
+  fields: Record<string, string>
+  /** StatefulSets: the replicas asked for. */
+  replicas?: number
+  /** CronJobs: paused. */
+  suspended?: boolean
+}
+
+/** A ConfigMap's or Secret's keys. Secret values never leave the main process. */
+export interface KubeData {
+  entries: { key: string; bytes: number; /** ConfigMaps only. */ value?: string }[]
+  /** Secrets: their type, e.g. kubernetes.io/tls. */
+  type?: string
+}
 
 export interface KubeOverview {
   pods: { name: string; namespace: string; status: string; ready: string; restarts: number; node?: string; containers: string[]; /** Declared container ports, for forwarding. */ ports: number[]; createdAt?: string }[]

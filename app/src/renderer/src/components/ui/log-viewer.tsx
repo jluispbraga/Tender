@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ChevronDown, ChevronUp, Clock } from 'lucide-react'
+import { ArrowDown, ChevronDown, ChevronUp, Clock, Download, ListFilter, Pause, Play } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { Button } from './button'
 import { CopyButton } from './copy-button'
@@ -19,8 +19,9 @@ export interface LogLine {
  * Real data will be virtualised in replica-build; this primitive renders the
  * buffer it is given.
  */
-export function LogViewer({ lines, label }: { lines: LogLine[]; label: string }) {
+export function LogViewer({ lines: all, label, fileName, toolbar }: { lines: LogLine[]; label: string; /** Name for Save, without .log. */ fileName?: string; /** Extra controls, before Pause. */ toolbar?: React.ReactNode }) {
   const [query, setQuery] = useState('')
+  const [onlyMatches, setOnlyMatches] = useState(false)
   const [showTs, setShowTs] = useState(false)
   const [follow, setFollow] = useState(true)
   const [hit, setHit] = useState(0)
@@ -28,13 +29,18 @@ export function LogViewer({ lines, label }: { lines: LogLine[]; label: string })
   // Set while we scroll to the bottom ourselves, so that scroll event isn't read as the user leaving the tail.
   const autoScrolling = useRef(false)
 
+  const lines = useMemo(() => {
+    if (!onlyMatches || !query) return all
+    const q = query.toLowerCase()
+    return all.filter((l) => l.text.toLowerCase().includes(q))
+  }, [all, onlyMatches, query])
   const matches = useMemo(() => {
     if (!query) return []
     const q = query.toLowerCase()
     return lines.flatMap((l, i) => (l.text.toLowerCase().includes(q) ? [i] : []))
   }, [lines, query])
 
-  useEffect(() => setHit(0), [query])
+  useEffect(() => setHit(0), [query, onlyMatches])
   useLayoutEffect(() => {
     const el = scroller.current
     if (!follow || !el || el.scrollTop + el.clientHeight >= el.scrollHeight - 1) return
@@ -50,7 +56,7 @@ export function LogViewer({ lines, label }: { lines: LogLine[]; label: string })
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-2">
         <SearchField
           label="Search logs"
           placeholder="Search logs"
@@ -68,11 +74,19 @@ export function LogViewer({ lines, label }: { lines: LogLine[]; label: string })
         </span>
         <Button variant="ghost" size="sm" iconOnly aria-label="Previous match" icon={<ChevronUp />} disabled={!matches.length} onClick={() => step(-1)} />
         <Button variant="ghost" size="sm" iconOnly aria-label="Next match" icon={<ChevronDown />} disabled={!matches.length} onClick={() => step(1)} />
+        <Button variant="ghost" size="sm" icon={<ListFilter />} aria-pressed={onlyMatches} disabled={!query} onClick={() => setOnlyMatches((v) => !v)} className={cn(onlyMatches && query && 'bg-selected')}>
+          Matching lines only
+        </Button>
         <div className="flex-1" />
+        {toolbar}
+        <Button variant="ghost" size="sm" icon={follow ? <Pause /> : <Play />} onClick={() => setFollow((v) => !v)}>
+          {follow ? 'Stop scrolling' : 'Follow new lines'}
+        </Button>
         <Button variant="ghost" size="sm" icon={<Clock />} aria-pressed={showTs} onClick={() => setShowTs((v) => !v)} className={cn(showTs && 'bg-selected')}>
           Timestamps
         </Button>
-        <CopyButton label="Copy all logs" value={lines.map((l) => l.text).join('\n')} />
+        <CopyButton label={onlyMatches && query ? 'Copy matching lines' : 'Copy all logs'} value={lines.map((l) => l.text).join('\n')} />
+        <Button variant="ghost" size="sm" iconOnly aria-label="Save logs to a file" icon={<Download />} disabled={!lines.length} onClick={() => save(lines, fileName ?? label)} />
       </div>
       <div className="relative min-h-0 flex-1">
         <div
@@ -106,6 +120,17 @@ export function LogViewer({ lines, label }: { lines: LogLine[]; label: string })
       </div>
     </div>
   )
+}
+
+/** Hands the lines to the browser as a download; Electron asks where to save it. */
+function save(lines: LogLine[], name: string) {
+  const text = lines.map((l) => (l.ts ? `${l.ts} ${l.text}` : l.text)).join('\n') + '\n'
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${name.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'logs'}.log`
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 function highlight(text: string, q: string) {

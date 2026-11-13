@@ -6,6 +6,7 @@ import {
   type EngineStatus,
   type GridPrefs,
   type KubeForward,
+  type KubeItem,
   type GridView,
   type TenderApi,
   type ImageRow,
@@ -249,6 +250,7 @@ export function createFakeApi(): TenderApi {
   let fakeDoctorFixed = false
   const fakeKubeScale = { web: 1 }
   const fakeKubeDeleted = new Set<string>()
+  const fakeMore = { dbReplicas: 1, nightlySuspended: false, manualRuns: [] as string[] }
   const fakeForwards: KubeForward[] = []
   let fakeForwardId = 1
   let fakeKubeBroken = false
@@ -398,8 +400,45 @@ export function createFakeApi(): TenderApi {
           return `Scaled ${a.name} to ${a.replicas} ${a.replicas === 1 ? 'pod' : 'pods'}.`
         }
         if (a.kind === 'restart-deployment') return `Restarting ${a.name}: new pods replace the old ones one by one.`
+        if (a.kind === 'restart-statefulset') return `Restarting ${a.name}: its pods are replaced one at a time, highest number first.`
+        if (a.kind === 'scale-statefulset') {
+          fakeMore.dbReplicas = a.replicas
+          return `Scaled ${a.name} to ${a.replicas} ${a.replicas === 1 ? 'pod' : 'pods'}.`
+        }
+        if (a.kind === 'suspend-cronjob') {
+          fakeMore.nightlySuspended = a.suspend
+          return a.suspend ? `Paused ${a.name}: no new runs until you resume it.` : `Resumed ${a.name}: it runs on its schedule again.`
+        }
+        if (a.kind === 'run-cronjob') {
+          const job = `${a.name}-manual-${fakeMore.manualRuns.length + 1}`
+          fakeMore.manualRuns.push(job)
+          return `Started job ${job} from ${a.name}.`
+        }
         fakeKubeDeleted.add(a.name)
-        return `Deleted ${a.kind.slice(7)} ${a.name}.`
+        return `Deleted ${a.kind === 'delete' ? a.resource.replace(/s$/, '') : a.kind.slice(7)} ${a.name}.`
+      },
+      async list(_c, ns, kind) {
+        await sleep(150)
+        const at = (h: number) => new Date(Date.now() - h * 3600_000).toISOString()
+        const items: Record<typeof kind, KubeItem[]> = {
+          statefulsets: [{ name: 'db', namespace: 'shop', replicas: fakeMore.dbReplicas, createdAt: at(30), fields: { ready: `${fakeMore.dbReplicas}/${fakeMore.dbReplicas}`, images: 'postgres:16' } }],
+          jobs: [
+            { name: 'nightly-29012345', namespace: 'shop', createdAt: at(9), fields: { status: 'Complete', completions: '1/1', duration: '42s', owner: 'nightly' } },
+            { name: 'migrate-v42', namespace: 'shop', createdAt: at(2), fields: { status: 'Failed', completions: '0/1', duration: '3m10s', owner: '' } },
+            ...fakeMore.manualRuns.map((n) => ({ name: n, namespace: 'shop', createdAt: at(0), fields: { status: 'Running', completions: '0/1', duration: '2s', owner: 'nightly' } })),
+          ],
+          cronjobs: [{ name: 'nightly', namespace: 'shop', suspended: fakeMore.nightlySuspended, createdAt: at(200), fields: { schedule: '0 3 * * *', timeZone: '', active: '0', lastSchedule: at(9) } }],
+          ingresses: [{ name: 'web', namespace: 'shop', createdAt: at(50), fields: { class: 'nginx', hosts: 'shop.localtest.me', address: '192.168.49.2', ports: '80, 443' } }],
+          configmaps: [{ name: 'web-config', namespace: 'shop', createdAt: at(50), fields: { keys: 'LOG_LEVEL, app.yaml', count: '2' } }],
+          secrets: [{ name: 'db-password', namespace: 'shop', createdAt: at(50), fields: { type: 'Opaque', keys: 'password, username', count: '2' } }],
+        }
+        return items[kind].filter((x) => (ns === '*' || x.namespace === ns) && !fakeKubeDeleted.has(x.name))
+      },
+      async data(_c, _ns, kind) {
+        await sleep(100)
+        return kind === 'configmaps'
+          ? { entries: [{ key: 'LOG_LEVEL', bytes: 4, value: 'info' }, { key: 'app.yaml', bytes: 31, value: 'port: 8080\nfeatures:\n  search: true' }] }
+          : { type: 'Opaque', entries: [{ key: 'password', bytes: 24 }, { key: 'username', bytes: 4 }] }
       },
       logs(_c, _n, pod, _k, onEvent, opts) {
         if (opts?.previous) {
