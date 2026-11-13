@@ -12,6 +12,7 @@
     "build:renderer": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
     "test:unit": "node scripts/unit.mjs",
+    "shots": "node scripts/shots.mjs",
     "dist": "npm run build && electron-builder --publish never",
     "dist:win": "npm run build && electron-builder --win nsis portable --publish never",
     "dist:linux": "npm run build && electron-builder --linux AppImage deb --publish never"
@@ -64,7 +65,7 @@
   "description": "A small desktop GUI for the Docker Engine you already run.",
   "author": "jluispbraga",
   "license": "MIT",
-  "homepage": "https://github.com/jluispbraga/Harbor",
+  "homepage": "https://github.com/jluispbraga/Tender",
   "build": {
     "appId": "io.github.jluispbraga.tender",
     "productName": "Tender",

@@ -17,6 +17,21 @@ Tender does not replace the Docker Engine or the Docker CLI. It connects to the 
 
 Tender runs on **Windows** and **Linux**. macOS builds from source.
 
+![Tender: containers grouped by Compose project, with status, ports, CPU and memory](docs/screenshots/containers.png)
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/logs.png" alt="Live container logs with search, matching lines only, stop scrolling and save"></td>
+    <td><img src="docs/screenshots/kubernetes.png" alt="Kubernetes pods across namespaces, with status, restarts and CPU and memory per pod"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/images.png" alt="Local images, which are in use, unused or dangling, and their size"></td>
+    <td><img src="docs/screenshots/resources.png" alt="Memory and disk on Windows: what WSL holds, memory reclaim, sparse virtual disks, build cache"></td>
+  </tr>
+</table>
+
+<sub>Screenshots use the built-in sample data (`npm run shots` in `app/` takes them again).</sub>
+
 ---
 
 ## Architecture & System Overview
@@ -66,7 +81,11 @@ Download the latest build from [Releases](https://github.com/jluispbraga/Tender/
 | Windows | `Tender-Setup-<version>.exe` (installer) or `Tender-<version>-portable.exe` |
 | Linux | `Tender-<version>-x86_64.AppImage` (any distribution) or `tender_<version>_amd64.deb` (Debian, Ubuntu) |
 
-The builds are not code-signed yet, so Windows SmartScreen may warn on first run. Each release lists SHA-256 checksums in `SHA256SUMS.txt`.
+The builds are not code-signed yet, so on first run Windows SmartScreen shows "Windows protected your PC". Choose **More info**, then **Run anyway**. To check that the file is the one GitHub Actions built, compare its hash with `SHA256SUMS.txt` in the same release:
+
+```powershell
+Get-FileHash .\Tender-Setup-<version>.exe -Algorithm SHA256
+```
 
 On Linux, make the AppImage executable first: `chmod +x Tender-*.AppImage`.
 
@@ -139,7 +158,8 @@ Tender/
 │   ├── kube.yml                  # Kubernetes integration tests against a kind cluster
 │   └── release.yml               # Windows and Linux builds for v* tags, attached to a draft release
 ├── docs/
-│   └── migrate-from-docker-desktop.md   # Moving containers, images and volumes off Docker Desktop
+│   ├── migrate-from-docker-desktop.md   # Moving containers, images and volumes off Docker Desktop
+│   └── screenshots/              # README images (npm run shots)
 ├── tools/
 │   └── migrate-from-docker-desktop.ps1  # Command-line version of the migration
 ├── LICENSE

@@ -17,6 +17,21 @@ O Tender não substitui o Docker Engine nem a Docker CLI. Ele se conecta ao Dock
 
 O Tender roda no **Windows** e no **Linux**. No macOS, é preciso compilar a partir do código-fonte.
 
+![Tender: containers agrupados por projeto Compose, com status, portas, CPU e memória](docs/screenshots/containers.png)
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/logs.png" alt="Logs ao vivo de um container, com busca, só as linhas que batem, parar a rolagem e salvar"></td>
+    <td><img src="docs/screenshots/kubernetes.png" alt="Pods do Kubernetes em todos os namespaces, com status, reinícios e CPU e memória por pod"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/images.png" alt="Imagens locais, quais estão em uso, sem uso ou órfãs, e o tamanho de cada uma"></td>
+    <td><img src="docs/screenshots/resources.png" alt="Memória e disco no Windows: o que o WSL ocupa, recuperação de memória, discos virtuais esparsos, cache de build"></td>
+  </tr>
+</table>
+
+<sub>Os prints usam os dados de exemplo do próprio app (`npm run shots` em `app/` tira de novo).</sub>
+
 ---
 
 ## Arquitetura e Visão Geral do Sistema
@@ -66,7 +81,11 @@ Baixe a versão mais recente em [Releases](https://github.com/jluispbraga/Tender
 | Windows | `Tender-Setup-<versão>.exe` (instalador) ou `Tender-<versão>-portable.exe` |
 | Linux | `Tender-<versão>-x86_64.AppImage` (qualquer distribuição) ou `tender_<versão>_amd64.deb` (Debian, Ubuntu) |
 
-Os builds ainda não têm assinatura de código, então o SmartScreen do Windows pode avisar na primeira execução. Cada release traz os checksums SHA-256 em `SHA256SUMS.txt`.
+Os builds ainda não têm assinatura de código, então na primeira execução o SmartScreen do Windows mostra "O Windows protegeu o computador". Clique em **Mais informações** e depois em **Executar assim mesmo**. Para conferir que o arquivo é o mesmo que o GitHub Actions gerou, compare o hash dele com o `SHA256SUMS.txt` da mesma release:
+
+```powershell
+Get-FileHash .\Tender-Setup-<versão>.exe -Algorithm SHA256
+```
 
 No Linux, torne o AppImage executável antes: `chmod +x Tender-*.AppImage`.
 
@@ -139,7 +158,8 @@ Tender/
 │   ├── kube.yml                  # Testes de integração Kubernetes num cluster kind
 │   └── release.yml               # Builds Windows e Linux para tags v*, anexados a uma release rascunho
 ├── docs/
-│   └── migrate-from-docker-desktop.md   # Como levar containers, imagens e volumes para fora do Docker Desktop
+│   ├── migrate-from-docker-desktop.md   # Como levar containers, imagens e volumes para fora do Docker Desktop
+│   └── screenshots/              # Imagens do README (npm run shots)
 ├── tools/
 │   └── migrate-from-docker-desktop.ps1  # Versão de linha de comando da migração
 ├── LICENSE

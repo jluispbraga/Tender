@@ -1,0 +1,51 @@
+name: Bug report
+description: Something in Tender does not work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. For a security problem, please use Security › Report a vulnerability instead of an issue.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead. Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Containers
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Tender version
+      description: Settings › Updates shows it.
+      placeholder: 0.8.0
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Where the engine runs
+      options:
+        - Windows, Docker Engine inside WSL 2
+        - Windows, Docker Desktop or dockerd as a service
+        - Linux, system service
+        - Linux, rootless
+        - Remote (DOCKER_HOST or a Docker context)
+        - Not about the Docker engine (Kubernetes, settings, ...)
+    validations:
+      required: true
+  - type: textarea
+    id: checkup
+    attributes:
+      label: Checkup and versions
+      description: On Windows, the result of Troubleshoot › Checkup (the life ring icon at the top). Otherwise the output of `docker version`. Remove anything private.
+      render: text

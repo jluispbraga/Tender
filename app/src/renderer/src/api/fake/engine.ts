@@ -258,10 +258,10 @@ export function createFakeApi(): TenderApi {
   let fakeUpdate: UpdateStatus = { supported: true, current: '0.4.0', state: 'none', releases: 'https://github.com/jluispbraga/Tender/releases' }
   const fakeResources: WslResources = {
     memory: { vmBytes: 3_050_000_000, hostBytes: 16_600_000_000, limit: null, reclaim: 'disabled' },
-    disks: [{ distro: 'Ubuntu', path: 'C:\Users\you\AppData\Local\Packages\Ubuntu\LocalState\ext4.vhdx', fileBytes: 59_000_000_000, usedBytes: 41_000_000_000, sparse: false, running: true, version: 2 }],
+    disks: [{ distro: 'Ubuntu', path: String.raw`C:\Users\you\AppData\Local\Packages\Ubuntu\LocalState\ext4.vhdx`, fileBytes: 59_000_000_000, usedBytes: 41_000_000_000, sparse: false, running: true, version: 2 }],
     sparseByDefault: false,
     buildCache: { total: 6_200_000_000, reclaimable: 5_900_000_000 },
-    wslconfig: 'C:\Users\you\.wslconfig',
+    wslconfig: String.raw`C:\Users\you\.wslconfig`,
   }
   let fakeTools: WindowsTools = { pipe: { state: 'serving', distro: 'Ubuntu' }, cli: null, compose: null, buildx: null, context: 'desktop-linux', contextUsesPipe: false, binOnPath: false }
 
@@ -573,7 +573,7 @@ export function createFakeApi(): TenderApi {
             i++
             return
           }
-          fakeTools = { ...fakeTools, cli: { path: 'C:\Users\you\AppData\Local\Tender\bin\docker.exe', version: '29.4.3', own: true }, compose: '5.1.3', buildx: 'v0.30.1', binOnPath: true }
+          fakeTools = { ...fakeTools, cli: { path: String.raw`C:\Users\you\AppData\Local\Tender\bin\docker.exe`, version: '29.4.3', own: true }, compose: '5.1.3', buildx: 'v0.30.1', binOnPath: true }
           onStep({ type: 'done' })
           clearInterval(timer)
         }, 80)
