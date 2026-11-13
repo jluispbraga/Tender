@@ -27,6 +27,7 @@ export const defaultSettings: Settings = {
   check_updates: true,
   kube_sources: [],
   kube_labels: {},
+  kube_forwards: [],
 }
 
 const now = () => new Date().toISOString()

@@ -17,6 +17,9 @@ export const settingValue = {
   kube_labels: z
     .record(z.string().min(1).max(1300), z.object({ name: z.string().trim().max(60).optional(), env: z.enum(['local', 'dev', 'qa', 'prod']).optional() }))
     .refine((r) => Object.keys(r).length <= 300, 'Too many cluster names.'),
+  kube_forwards: z
+    .array(z.object({ context: z.string().min(1).max(253), kind: z.enum(['pod', 'service']), namespace: z.string().min(1).max(253), name: z.string().min(1).max(253), port: z.number().int().min(1).max(65535), localPort: z.number().int().min(1).max(65535) }))
+    .max(50),
 } as const
 
 // Compile-time check: every setting has a validator, and every validator a setting.

@@ -77,7 +77,7 @@ export function ForwardDialog({ context, clusterName, target, onClose }: { conte
       open
       onOpenChange={(o) => !o && !busy && onClose()}
       title={`Forward a port to ${target.name}`}
-      description={`Opens a port on this computer (127.0.0.1 only) that reaches the ${target.kind} in ${clusterName} / ${target.namespace}, like kubectl port-forward. It stops when you stop it or quit Tender.`}
+      description={`Opens a port on this computer (127.0.0.1 only) that reaches the ${target.kind} in ${clusterName} / ${target.namespace}, like kubectl port-forward. It starts again each time Tender opens, until you stop it.`}
       size="sm"
       footer={
         <>

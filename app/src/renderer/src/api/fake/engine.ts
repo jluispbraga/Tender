@@ -62,6 +62,7 @@ export function createFakeApi(): TenderApi {
     check_updates: true,
     kube_sources: [],
     kube_labels: {},
+    kube_forwards: [],
   }
   const fakeProd = String.raw`C:\Users\you\.kube\prod`
   const grid: Record<GridView, GridPrefs> = { containers: { hidden: ['created'] }, images: { hidden: [] }, volumes: { hidden: [] } }
@@ -323,6 +324,7 @@ export function createFakeApi(): TenderApi {
         const pods = [
           { name: 'web-7d9f8b6c5-x2k4p', namespace: 'shop', status: 'Running', ready: '1/1', restarts: 0, node: 'kind-dev-control-plane', containers: ['web'], ports: [8080], createdAt: new Date(Date.now() - 3 * 3600_000).toISOString() },
           { name: 'worker-5c6d7f8-abcde', namespace: 'shop', status: 'CrashLoopBackOff', ready: '0/1', restarts: 7, node: 'kind-dev-control-plane', containers: ['worker'], ports: [], createdAt: new Date(Date.now() - 3 * 3600_000).toISOString() },
+          { name: 'migrate-v42-7xk2p', namespace: 'shop', status: 'Error', ready: '0/1', restarts: 0, node: 'kind-dev-control-plane', containers: ['migrate'], ports: [], createdAt: new Date(Date.now() - 2 * 3600_000).toISOString(), owner: { kind: 'Job', name: 'migrate-v42' } },
           { name: 'coredns-5d78c9869d-q8rlz', namespace: 'kube-system', status: 'Running', ready: '1/1', restarts: 0, node: 'kind-dev-control-plane', containers: ['coredns'], ports: [53], createdAt: new Date(Date.now() - 86400_000).toISOString() },
         ]
         const keep = <T extends { namespace: string; name: string }>(xs: T[]) => (ns === '*' ? xs : xs.filter((x) => x.namespace === ns)).filter((x) => !fakeKubeDeleted.has(x.name))
@@ -433,6 +435,11 @@ export function createFakeApi(): TenderApi {
           secrets: [{ name: 'db-password', namespace: 'shop', createdAt: at(50), fields: { type: 'Opaque', keys: 'password, username', count: '2' } }],
         }
         return items[kind].filter((x) => (ns === '*' || x.namespace === ns) && !fakeKubeDeleted.has(x.name))
+      },
+      async yaml(_c, kind, ns, name) {
+        await sleep(100)
+        const secret = kind === 'secrets'
+        return `apiVersion: v1\nkind: ${secret ? 'Secret' : kind === 'pods' ? 'Pod' : 'Object'}\nmetadata:\n  name: ${name}\n  namespace: ${ns}\n${secret ? 'data:\n  password: (hidden)\n  username: (hidden)\ntype: Opaque\n' : 'spec:\n  replicas: 1\n'}`
       },
       async data(_c, _ns, kind) {
         await sleep(100)

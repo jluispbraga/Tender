@@ -287,6 +287,7 @@ export async function overview(context: string, namespace: string): Promise<Kube
           containers: p.spec?.containers.map((c) => c.name) ?? [],
           ports: [...new Set((p.spec?.containers ?? []).flatMap((c) => (c.ports ?? []).filter((x) => (x.protocol ?? 'TCP') === 'TCP').map((x) => x.containerPort)))],
           createdAt: age(p.metadata?.creationTimestamp),
+          owner: ((o) => (o ? { kind: o.kind, name: o.name } : undefined))(p.metadata?.ownerReferences?.find((o) => o.controller) ?? p.metadata?.ownerReferences?.[0]),
         }
       }),
       deployments: deps.items.map((d) => ({

@@ -1,5 +1,8 @@
-export function Table({ label, head, rows }: { label: string; head: string[]; rows: React.ReactNode[][] }) {
-  if (!rows.length) return <p className="p-6 text-sm text-muted">No {label.toLowerCase()} here.</p>
+export function Table({ label, head, rows, filter, problemsOnly }: { label: string; head: string[]; rows: React.ReactNode[][]; /** The name search, to say why the table is empty. */ filter?: string; problemsOnly?: boolean }) {
+  if (!rows.length) {
+    const what = label.toLowerCase()
+    return <p className="p-6 text-sm text-muted">{problemsOnly ? `No ${what} with a problem${filter ? ` and “${filter}” in the name` : ''}. Everything here is running.` : filter ? `No ${what} with “${filter}” in the name.` : `No ${what} here.`}</p>
+  }
   return (
     <table aria-label={label} className="w-full border-collapse text-sm">
       <thead>

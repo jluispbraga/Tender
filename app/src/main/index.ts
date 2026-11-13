@@ -7,6 +7,7 @@ import { registerIpc } from './ipc'
 import { PipeShare } from './tools/windows-tools'
 import { startUpdates } from './updates'
 import { setKubeSources } from './k8s/kube'
+import { onForwardsChanged, restoreForwards } from './k8s/pod-tools'
 import { guardMainProcess, setCrashNotify } from './crash-guard'
 import trayIcon from '../../resources/tray.png?asset'
 import trayIcon2x from '../../resources/tray@2x.png?asset'
@@ -175,6 +176,11 @@ app.whenReady().then(() => {
   setCrashNotify(ipc.notify)
   startUpdates(settings.check_updates)
   setKubeSources(settings.kube_sources)
+  onForwardsChanged((specs) => store.setSetting('kube_forwards', specs))
+  if (settings.kube_forwards.length)
+    void restoreForwards(settings.kube_forwards, (s, why) =>
+      ipc.notify({ kind: 'error', title: `Port forward localhost:${s.localPort} did not come back`, body: `${s.kind} ${s.namespace}/${s.name}:${s.port} in ${s.context}: ${why} Start it again from Kubernetes if you still need it.` }),
+    )
   engine.onStatus(() => {
     tray?.setContextMenu(trayMenu())
     void share.sync(store.settings().share_docker_pipe)

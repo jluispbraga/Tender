@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { V1Job } from '@kubernetes/client-node'
-import { duration, jobStatus, manualJobName } from './resources'
+import { dumpObject, duration, jobStatus, manualJobName } from './resources'
 
 describe('duration: how long a job ran, as kubectl shows it', () => {
   const t0 = '2026-01-01T00:00:00Z'
@@ -36,5 +36,26 @@ describe('manualJobName: a run started by hand from a CronJob', () => {
     const n = manualJobName('a'.repeat(70) + '-report', 1_700_000_000_000)
     expect(n.length).toBeLessThanOrEqual(63)
     expect(n).toMatch(/^a+-manual-[0-9a-z]+$/)
+  })
+})
+
+describe('dumpObject: the YAML view', () => {
+  it('never shows a secret value, not even in kubectl apply’s annotation', () => {
+    const y = dumpObject('secrets', {
+      metadata: { name: 'db', namespace: 'shop', managedFields: [{ manager: 'kubectl' }], annotations: { 'kubectl.kubernetes.io/last-applied-configuration': '{"stringData":{"password":"hunter2"}}' } },
+      data: { password: Buffer.from('hunter2').toString('base64') },
+      stringData: { token: 'abc123' },
+      type: 'Opaque',
+    })
+    expect(y).not.toContain('hunter2')
+    expect(y).not.toContain(Buffer.from('hunter2').toString('base64'))
+    expect(y).not.toContain('abc123')
+    expect(y).toContain('password: (hidden)')
+    expect(y).toMatch(/^apiVersion: v1\nkind: Secret\nmetadata:/)
+  })
+  it('drops managedFields and keeps the rest', () => {
+    const y = dumpObject('configmaps', { metadata: { name: 'c', managedFields: [{ manager: 'x' }] }, data: { LOG_LEVEL: 'info' } })
+    expect(y).not.toContain('managedFields')
+    expect(y).toContain('LOG_LEVEL: info')
   })
 })

@@ -97,6 +97,7 @@ export function registerIpc(deps: IpcDeps) {
         a.kind === 'delete' || a.kind === 'restart-statefulset' || a.kind === 'run-cronjob' || a.kind === 'scale-statefulset' || a.kind === 'suspend-cronjob' ? kubeMore.actMore(c, a) : kube.act(c, a),
     },
     'kube.list': { args: z.tuple([kubeName, kubeName, kubeKind]), run: ([c, n, k]) => kubeMore.list(c, n, k) },
+    'kube.yaml': { args: z.tuple([kubeName, z.enum(['pods', 'deployments', 'services', 'statefulsets', 'jobs', 'cronjobs', 'ingresses', 'configmaps', 'secrets']), kubeName, kubeName]), run: ([c, k, n, name]) => kubeMore.yaml(c, k, n, name) },
     'kube.data': { args: z.tuple([kubeName, kubeName, z.enum(['configmaps', 'secrets']), kubeName]), run: ([c, n, k, name]) => kubeMore.data(c, n, k, name) },
     'resources.status': { args: z.tuple([]), run: () => resources.status(engine) },
     'resources.act': {

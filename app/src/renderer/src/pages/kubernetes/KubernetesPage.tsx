@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Cable, Eye, Info, Loader2, Pencil, RefreshCw, RotateCw, Scale, Ship, SquareTerminal, Trash2 } from 'lucide-react'
+import { Braces, Cable, Eye, Info, Loader2, Pencil, RefreshCw, RotateCw, Scale, Ship, SquareTerminal, Trash2 } from 'lucide-react'
 import { api, type KubeAction, type KubeItem, type KubeKind, type KubeOverview } from '@/api'
 import { PageHeader } from '@/app/AppShell'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog, Modal } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
+import { Input, SearchField } from '@/components/ui/input'
 import { ActionsMenu } from '@/components/ui/menu'
 import { Select } from '@/components/ui/select'
 import { useToast } from '@/components/ui/toast'
@@ -16,9 +16,11 @@ import { setSetting, useSettings } from '@/lib/queries'
 import { href } from '@/lib/router'
 import { ClusterLabelDialog, EnvBadge, clusterLabel, optionText } from './ClusterLabel'
 import { ForwardDialog, ForwardsBar, type ForwardTarget } from './Forwards'
-import { DataDialog, MoreKinds, kindLabel, type ChangeRequest, type DeleteRequest, type ScaleRequest } from './MoreKinds'
+import { deploymentProblem, podProblem } from './health'
+import { DataDialog, MoreKinds, NoStatus, kindLabel, type ChangeRequest, type DeleteRequest, type ScaleRequest } from './MoreKinds'
 import { PodPanel, type PodTab } from './PodPanel'
 import { Table } from './Table'
+import { YamlDialog, type YamlTarget } from './YamlDialog'
 
 type Pod = KubeOverview['pods'][number]
 type Tab = 'pods' | 'deployments' | 'services' | KubeKind
@@ -40,6 +42,9 @@ export function KubernetesPage() {
   const [ns, setNs] = useState<string>('*')
   const [tab, setTab] = useState<Tab>('pods')
   const [panel, setPanel] = useState<{ pod: Pod; tab: PodTab } | null>(null)
+  const [filter, setFilter] = useState('')
+  const [problemsOnly, setProblemsOnly] = useState(false)
+  const [yamlOf, setYamlOf] = useState<YamlTarget | null>(null)
   const [forwarding, setForwarding] = useState<ForwardTarget | null>(null)
   const context = ctx ?? contexts.data?.find((c) => c.current)?.name ?? contexts.data?.[0]?.name ?? null
   const current = contexts.data?.find((c) => c.name === context)
@@ -96,8 +101,20 @@ export function KubernetesPage() {
     )
   }
 
-  const data = overview.data
+  const q = filter.trim().toLowerCase()
+  const named = <T extends { name: string }>(xs: T[] = []) => (q ? xs.filter((x) => x.name.toLowerCase().includes(q)) : xs)
+  const data = overview.data && {
+    pods: named(overview.data.pods).filter((p) => !problemsOnly || podProblem(p)),
+    deployments: named(overview.data.deployments).filter((d) => !problemsOnly || deploymentProblem(d)),
+    services: named(overview.data.services),
+  }
   const counts: Partial<Record<Tab, number>> = { pods: data?.pods.length, deployments: data?.deployments.length, services: data?.services.length }
+  // A job's log is its pod's: the newest pod the job made.
+  const jobLogs = (job: KubeItem) => {
+    const pod = (overview.data?.pods ?? []).filter((p) => p.owner?.kind === 'Job' && p.owner.name === job.name && p.namespace === job.namespace).sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))[0]
+    if (pod) setPanel({ pod, tab: 'logs' })
+    else toast({ kind: 'info', title: `${job.name} has no pod left`, body: 'Kubernetes removed it after the job finished (ttlSecondsAfterFinished), and its log went with it.' })
+  }
 
   return (
     <>
@@ -145,17 +162,25 @@ export function KubernetesPage() {
           </p>
         ) : (
           <>
-            <div role="tablist" aria-label="Kind" className="flex shrink-0 flex-wrap gap-x-1 border-b border-line px-4">
-              {tabs.map((t) => (
-                <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={cn('-mb-px shrink-0 border-b-2 px-3 py-2 text-sm whitespace-nowrap', tab === t ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg')}>
-                  {tabLabel(t)} {counts[t] !== undefined && <span className="text-muted tabular-nums">{counts[t]}</span>}
-                </button>
-              ))}
+            <div className="flex shrink-0 flex-wrap items-end gap-x-3 border-b border-line px-4">
+              <div role="tablist" aria-label="Kind" className="flex flex-1 flex-wrap gap-x-1">
+                {tabs.map((t) => (
+                  <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={cn('-mb-px shrink-0 border-b-2 px-3 py-2 text-sm whitespace-nowrap', tab === t ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg')}>
+                    {tabLabel(t)} {counts[t] !== undefined && <span className="text-muted tabular-nums">{counts[t]}</span>}
+                  </button>
+                ))}
+              </div>
+              <div className="my-1.5 flex items-center gap-2">
+                <Select label="Status" value={problemsOnly ? 'problems' : 'all'} onValueChange={(v) => setProblemsOnly(v === 'problems')} options={[{ value: 'all', label: 'All' }, { value: 'problems', label: 'Only problems' }]} className="w-36" />
+                <SearchField label="Filter by name" placeholder="Filter by name" value={filter} onChange={setFilter} className="w-56" />
+              </div>
             </div>
             <div className="min-h-0 flex-1 overflow-auto">
               {tab === 'pods' && (
                 <Table
                   label="Pods"
+                  filter={q}
+                  problemsOnly={problemsOnly}
                   head={['Name', 'Namespace', 'Status', 'Ready', 'Restarts', 'Age', '', '']}
                   rows={data.pods.map((p) => [
                     <span className="font-medium">{p.name}</span>,
@@ -173,6 +198,7 @@ export function KubernetesPage() {
                         { label: 'Details and events', icon: <Info />, onSelect: () => setPanel({ pod: p, tab: 'details' }) },
                         { label: 'Open a terminal', icon: <SquareTerminal />, onSelect: () => setPanel({ pod: p, tab: 'terminal' }) },
                         { label: 'Forward a port…', icon: <Cable />, onSelect: () => setForwarding({ kind: 'pod', namespace: p.namespace, name: p.name, ports: p.ports }) },
+                        { label: 'View YAML', icon: <Braces />, onSelect: () => setYamlOf({ kind: 'pods', namespace: p.namespace, name: p.name }) },
                         { kind: 'separator' },
                         { label: 'Delete pod', icon: <Trash2 />, danger: true, onSelect: () => setPendingDelete({ what: 'pod', namespace: p.namespace, name: p.name, impact: 'If a deployment owns it, Kubernetes starts a new pod in its place.', action: { kind: 'delete-pod', namespace: p.namespace, name: p.name } }) },
                       ]}
@@ -183,6 +209,8 @@ export function KubernetesPage() {
               {tab === 'deployments' && (
                 <Table
                   label="Deployments"
+                  filter={q}
+                  problemsOnly={problemsOnly}
                   head={['Name', 'Namespace', 'Ready', 'Up to date', 'Images', '']}
                   rows={data.deployments.map((d) => [
                     <span className="font-medium">{d.name}</span>,
@@ -194,6 +222,7 @@ export function KubernetesPage() {
                       label={`Actions for ${d.name}`}
                       entries={[
                         { label: 'Restart', icon: <RefreshCw />, onSelect: () => change({ title: `Restart ${d.name} in production?`, description: `New pods replace the old ones one by one in ${here.label} / ${d.namespace}.`, label: 'Restart', action: { kind: 'restart-deployment', namespace: d.namespace, name: d.name } }) },
+                        { label: 'View YAML', icon: <Braces />, onSelect: () => setYamlOf({ kind: 'deployments', namespace: d.namespace, name: d.name }) },
                         { label: 'Scale…', icon: <Scale />, onSelect: () => setScaling({ what: 'deployment', name: d.name, namespace: d.namespace, ready: d.ready, replicas: d.replicas, to: (n) => ({ kind: 'scale-deployment', namespace: d.namespace, name: d.name, replicas: n }) }) },
                         { kind: 'separator' },
                         { label: 'Delete deployment', icon: <Trash2 />, danger: true, onSelect: () => setPendingDelete({ what: 'deployment', namespace: d.namespace, name: d.name, impact: 'Its pods stop and are removed too.', action: { kind: 'delete-deployment', namespace: d.namespace, name: d.name } }) },
@@ -202,9 +231,11 @@ export function KubernetesPage() {
                   ])}
                 />
               )}
+              {tab === 'services' && problemsOnly && <NoStatus what="Services" />}
               {tab === 'services' && (
                 <Table
                   label="Services"
+                  filter={q}
                   head={['Name', 'Namespace', 'Type', 'Cluster IP', 'Ports', '']}
                   rows={data.services.map((s) => [
                     <span className="font-medium">{s.name}</span>,
@@ -216,6 +247,7 @@ export function KubernetesPage() {
                       label={`Actions for ${s.name}`}
                       entries={[
                         { label: 'Forward a port…', icon: <Cable />, onSelect: () => setForwarding({ kind: 'service', namespace: s.namespace, name: s.name, ports: s.portNumbers }) },
+                        { label: 'View YAML', icon: <Braces />, onSelect: () => setYamlOf({ kind: 'services', namespace: s.namespace, name: s.name }) },
                         { kind: 'separator' },
                         { label: 'Delete service', icon: <Trash2 />, danger: true, onSelect: () => setPendingDelete({ what: 'service', namespace: s.namespace, name: s.name, impact: 'Pods behind it keep running, but nothing reaches them through this service.', action: { kind: 'delete-service', namespace: s.namespace, name: s.name } }) },
                       ]}
@@ -233,6 +265,10 @@ export function KubernetesPage() {
                   onChange={change}
                   onScale={setScaling}
                   onView={(item) => setViewing({ kind: tab === 'secrets' ? 'secrets' : 'configmaps', item })}
+                  onLogs={jobLogs}
+                  onYaml={(i) => setYamlOf({ kind: tab, namespace: i.namespace, name: i.name })}
+                  filter={q}
+                  problemsOnly={problemsOnly}
                 />
               )}
             </div>
@@ -254,6 +290,7 @@ export function KubernetesPage() {
         }}
       />
       {forwarding && context && <ForwardDialog context={context} clusterName={here.label} target={forwarding} onClose={() => setForwarding(null)} />}
+      {yamlOf && context && <YamlDialog context={context} target={yamlOf} onClose={() => setYamlOf(null)} />}
       {viewing && context && <DataDialog context={context} kind={viewing.kind} item={viewing.item} onClose={() => setViewing(null)} />}
       {pendingChange && (
         <Modal

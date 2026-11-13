@@ -1,0 +1,50 @@
+# The Kubernetes code against a real cluster: kind on Linux, the fixture in
+# app/e2e/kube/fixture.yaml, then src/main/k8s/kube.it.test.ts on Electron's Node.
+name: kubernetes
+
+on:
+  push:
+    branches: [main]
+    paths: ['app/src/main/k8s/**', 'app/e2e/kube/**', 'app/package-lock.json', '.github/workflows/kube.yml']
+  pull_request:
+    paths: ['app/src/main/k8s/**', 'app/e2e/kube/**', 'app/package-lock.json', '.github/workflows/kube.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kube-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: helm/kind-action@v1.15.2
+        with:
+          cluster_name: tender
+      - name: Fixture
+        run: |
+          kubectl apply -f e2e/kube/fixture.yaml
+          kubectl -n tender-it rollout status deploy/web --timeout=180s
+          kubectl -n tender-it rollout status sts/db --timeout=180s
+          kubectl -n tender-it wait --for=condition=failed job/fails --timeout=180s
+      - run: npm ci
+      - name: Integration tests
+        run: npm run test:unit -- src/main/k8s/kube.it.test.ts
+        env:
+          TENDER_KUBE_IT: kind-tender
+      - name: Cluster state on failure
+        if: failure()
+        run: kubectl get all -n tender-it -o wide && kubectl get events -n tender-it --sort-by=.lastTimestamp | tail -40

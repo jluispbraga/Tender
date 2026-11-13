@@ -16,8 +16,10 @@ export type PodTab = 'logs' | 'details' | 'terminal'
 /** The panel under the list for one pod: its logs, its details and events, or a shell in it. */
 export function PodPanel({ context, pod, tab, onTab, onClose }: { context: string; pod: Pod; tab: PodTab; onTab: (t: PodTab) => void; onClose: () => void }) {
   const [container, setContainer] = useState(pod.containers[0])
+  const [height, setHeight] = usePanelHeight()
   return (
-    <section aria-label={`Pod ${pod.name}`} className="flex h-80 shrink-0 flex-col border-t border-line">
+    <section aria-label={`Pod ${pod.name}`} style={{ height }} className="relative flex shrink-0 flex-col border-t border-line">
+      <ResizeHandle height={height} onResize={setHeight} />
       <div className="flex shrink-0 items-center gap-3 px-4 pt-2 text-sm">
         <span className="truncate font-medium text-fg">{pod.name}</span>
         <div role="tablist" aria-label="Pod view" className="flex gap-1">
@@ -41,6 +43,79 @@ export function PodPanel({ context, pod, tab, onTab, onClose }: { context: strin
         {tab === 'terminal' && <PodTerminal key={`${pod.name}/${container}`} context={context} pod={pod} container={container} />}
       </div>
     </section>
+  )
+}
+
+const HEIGHT_KEY = 'tender.kube.panelHeight'
+const MIN_HEIGHT = 160
+// Leave the header and a few rows of the list above the panel.
+const maxHeight = () => Math.max(MIN_HEIGHT, window.innerHeight - 220)
+const clamp = (h: number) => Math.round(Math.min(maxHeight(), Math.max(MIN_HEIGHT, h)))
+
+/** The panel's height, remembered across pods and restarts. */
+function usePanelHeight(): [number, (h: number) => void] {
+  const [h, set] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem(HEIGHT_KEY))
+      return clamp(saved || 320)
+    } catch {
+      return 320
+    }
+  })
+  useEffect(() => {
+    const fit = () => set((x) => clamp(x))
+    window.addEventListener('resize', fit)
+    return () => window.removeEventListener('resize', fit)
+  }, [])
+  const update = (next: number) => {
+    const v = clamp(next)
+    set(v)
+    try {
+      localStorage.setItem(HEIGHT_KEY, String(v))
+    } catch {
+      /* private profile: the height just isn't remembered */
+    }
+  }
+  return [h, update]
+}
+
+/** Drag the top edge, or focus it and use the arrow keys (Shift for bigger steps). */
+function ResizeHandle({ height, onResize }: { height: number; onResize: (h: number) => void }) {
+  return (
+    <div
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label="Resize pod panel"
+      aria-valuenow={height}
+      aria-valuemin={MIN_HEIGHT}
+      aria-valuemax={maxHeight()}
+      tabIndex={0}
+      className="absolute -top-1.5 right-0 left-0 z-10 h-3 cursor-row-resize outline-none after:absolute after:top-1/2 after:right-0 after:left-0 after:h-0.5 after:-translate-y-1/2 hover:after:bg-accent focus-visible:after:bg-focus"
+      onPointerDown={(e) => {
+        e.preventDefault()
+        const startY = e.clientY
+        const startH = height
+        const el = e.currentTarget
+        el.setPointerCapture(e.pointerId)
+        const move = (ev: PointerEvent) => onResize(startH + (startY - ev.clientY))
+        const up = () => {
+          el.removeEventListener('pointermove', move)
+          el.removeEventListener('pointerup', up)
+        }
+        el.addEventListener('pointermove', move)
+        el.addEventListener('pointerup', up)
+      }}
+      onDoubleClick={() => onResize(320)}
+      onKeyDown={(e) => {
+        const step = e.shiftKey ? 80 : 20
+        if (e.key === 'ArrowUp') onResize(height + step)
+        else if (e.key === 'ArrowDown') onResize(height - step)
+        else if (e.key === 'Home') onResize(maxHeight())
+        else if (e.key === 'End') onResize(MIN_HEIGHT)
+        else return
+        e.preventDefault()
+      }}
+    />
   )
 }
 

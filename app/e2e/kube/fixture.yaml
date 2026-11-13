@@ -1,0 +1,103 @@
+# What the Kubernetes integration test (src/main/k8s/kube.it.test.ts) runs against.
+# kubectl apply -f e2e/kube/fixture.yaml, then wait for it (see .github/workflows/kube.yml).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tender-it
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: tender-it
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: web }
+  template:
+    metadata:
+      labels: { app: web }
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27-alpine
+          ports:
+            - { name: http, containerPort: 80 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: tender-it
+spec:
+  selector: { app: web }
+  ports:
+    # A named targetPort: forwarding has to find the pod port by name.
+    - { port: 8080, targetPort: http }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db
+  namespace: tender-it
+spec:
+  serviceName: db
+  replicas: 1
+  selector:
+    matchLabels: { app: db }
+  template:
+    metadata:
+      labels: { app: db }
+    spec:
+      containers:
+        - name: db
+          image: busybox:1.36
+          command: ['sh', '-c', 'i=0; while true; do i=$((i+1)); echo "tick $i"; sleep 1; done']
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly
+  namespace: tender-it
+spec:
+  schedule: '0 3 * * *'
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: run
+              image: busybox:1.36
+              command: ['sh', '-c', 'echo nightly ran']
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fails
+  namespace: tender-it
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: run
+          image: busybox:1.36
+          command: ['sh', '-c', 'echo boom; exit 2']
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-config
+  namespace: tender-it
+data:
+  LOG_LEVEL: info
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-password
+  namespace: tender-it
+stringData:
+  password: it-secret-value-123

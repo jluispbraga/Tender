@@ -201,3 +201,58 @@ export async function actMore(context: string, a: MoreAction): Promise<string> {
     throw new Error(reason(e))
   }
 }
+
+/** What `kubectl get -o yaml` shows, minus managedFields; a Secret's values are blanked. */
+export async function yaml(context: string, kind: 'pods' | 'deployments' | 'services' | KubeKind, namespace: string, name: string): Promise<string> {
+  const kc = forContext(context)
+  const core = kc.makeApiClient(k8s.CoreV1Api)
+  const apps = kc.makeApiClient(k8s.AppsV1Api)
+  const batch = kc.makeApiClient(k8s.BatchV1Api)
+  const net = kc.makeApiClient(k8s.NetworkingV1Api)
+  const at = { name, namespace }
+  const read: Record<typeof kind, () => Promise<k8s.KubernetesObject & Record<string, unknown>>> = {
+    pods: () => core.readNamespacedPod(at) as never,
+    deployments: () => apps.readNamespacedDeployment(at) as never,
+    services: () => core.readNamespacedService(at) as never,
+    statefulsets: () => apps.readNamespacedStatefulSet(at) as never,
+    jobs: () => batch.readNamespacedJob(at) as never,
+    cronjobs: () => batch.readNamespacedCronJob(at) as never,
+    ingresses: () => net.readNamespacedIngress(at) as never,
+    configmaps: () => core.readNamespacedConfigMap(at) as never,
+    secrets: () => core.readNamespacedSecret(at) as never,
+  }
+  try {
+    return dumpObject(kind, await quick(read[kind](), context))
+  } catch (e) {
+    throw new Error(reason(e))
+  }
+}
+
+const kinds: Record<string, [string, string]> = {
+  pods: ['v1', 'Pod'],
+  deployments: ['apps/v1', 'Deployment'],
+  services: ['v1', 'Service'],
+  statefulsets: ['apps/v1', 'StatefulSet'],
+  jobs: ['batch/v1', 'Job'],
+  cronjobs: ['batch/v1', 'CronJob'],
+  ingresses: ['networking.k8s.io/v1', 'Ingress'],
+  configmaps: ['v1', 'ConfigMap'],
+  secrets: ['v1', 'Secret'],
+}
+
+/** Separate from the read so it can be tested: the hiding of secret values is the part that must not break. */
+export function dumpObject(kind: string, o: k8s.KubernetesObject & Record<string, unknown>): string {
+  const obj = JSON.parse(JSON.stringify(o)) as Record<string, any>
+  obj.apiVersion ??= kinds[kind]?.[0]
+  obj.kind ??= kinds[kind]?.[1]
+  if (obj.metadata) delete obj.metadata.managedFields
+  if (kind === 'secrets') {
+    for (const field of ['data', 'stringData']) if (obj[field]) for (const k of Object.keys(obj[field])) obj[field][k] = '(hidden)'
+    // kubectl apply keeps the whole manifest, values included, in this annotation.
+    if (obj.metadata?.annotations?.['kubectl.kubernetes.io/last-applied-configuration']) obj.metadata.annotations['kubectl.kubernetes.io/last-applied-configuration'] = '(hidden: it holds the values)'
+  }
+  // kubectl's order. Without apiVersion and kind the client dumps the object as
+  // it is instead of re-sorting it through its typed models, so those two go on top by hand.
+  const { apiVersion, kind: k, metadata, ...rest } = obj
+  return `apiVersion: ${apiVersion}\nkind: ${k}\n` + k8s.dumpYaml({ metadata, ...rest })
+}

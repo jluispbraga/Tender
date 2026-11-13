@@ -22,6 +22,7 @@ const changed: Settings = {
   check_updates: false,
   kube_sources: ['C:\\Users\\you\\.kube\\prod'],
   kube_labels: { 'c:\\users\\you\\.kube\\prod\\flake-prod-kubeconfig#microk8s': { name: 'Flake prod', env: 'prod' } },
+  kube_forwards: [{ context: 'minikube', kind: 'service', namespace: 'default', name: 'web', port: 80, localPort: 8088 }],
 }
 
 const keys = Object.keys(settingValue) as (keyof Settings)[]

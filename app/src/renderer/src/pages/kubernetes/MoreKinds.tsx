@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
-import { Eye, KeyRound, Loader2, Pause, Play, RefreshCw, Rocket, Scale, Trash2 } from 'lucide-react'
+import { Braces, Eye, FileText, KeyRound, Loader2, Pause, Play, RefreshCw, Rocket, Scale, Trash2 } from 'lucide-react'
 import { api, type KubeAction, type KubeItem, type KubeKind } from '@/api'
 import { Modal } from '@/components/ui/dialog'
 import { ActionsMenu, type MenuEntry } from '@/components/ui/menu'
 import { ago } from '@/lib/format'
+import { hasStatus, itemProblem } from './health'
 import { Table } from './Table'
 
 export const kindLabel: Record<KubeKind, string> = { statefulsets: 'StatefulSets', jobs: 'Jobs', cronjobs: 'CronJobs', ingresses: 'Ingresses', configmaps: 'ConfigMaps', secrets: 'Secrets' }
@@ -64,6 +65,10 @@ export function MoreKinds({
   onChange,
   onScale,
   onView,
+  onLogs,
+  onYaml,
+  filter,
+  problemsOnly,
 }: {
   context: string
   namespace: string
@@ -74,6 +79,11 @@ export function MoreKinds({
   onChange: (r: ChangeRequest) => void
   onScale: (r: ScaleRequest) => void
   onView: (i: KubeItem) => void
+  /** Jobs: show the log of the pod it ran. */
+  onLogs: (i: KubeItem) => void
+  onYaml: (i: KubeItem) => void
+  filter: string
+  problemsOnly: boolean
 }) {
   const q = useQuery({ queryKey: ['kube', 'list', context, namespace, kind], queryFn: () => api.kube.list(context, namespace, kind), refetchInterval: 5000, retry: false })
   if (q.isError) return <p className="m-6 rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">{(q.error as Error).message}</p>
@@ -104,10 +114,23 @@ export function MoreKinds({
             ? [{ label: 'View data', icon: <Eye />, onSelect: () => onView(i) }]
             : kind === 'secrets'
               ? [{ label: 'Show keys', icon: <KeyRound />, onSelect: () => onView(i) }]
-              : []
-    return [...own, ...(own.length ? [{ kind: 'separator' as const }] : []), { label: `Delete ${one[kind]}`, icon: <Trash2 />, danger: true, onSelect: () => onDelete({ what: one[kind], ...at, impact: deleteImpact[kind], action: { kind: 'delete', resource: kind, ...at } }) }]
+              : kind === 'jobs'
+                ? [{ label: 'Logs', icon: <FileText />, onSelect: () => onLogs(i) }]
+                : []
+    return [...own, { label: 'View YAML', icon: <Braces />, onSelect: () => onYaml(i) }, { kind: 'separator' as const }, { label: `Delete ${one[kind]}`, icon: <Trash2 />, danger: true, onSelect: () => onDelete({ what: one[kind], ...at, impact: deleteImpact[kind], action: { kind: 'delete', resource: kind, ...at } }) }]
   }
-  return <Table label={kindLabel[kind]} head={[...cols.map((c) => c.head), '']} rows={q.data.map((i) => [...cols.map((c) => c.cell(i)), <ActionsMenu label={`Actions for ${i.name}`} entries={entries(i)} />])} />
+  const judged = problemsOnly && hasStatus(kind)
+  const shown = q.data.filter((i) => (!filter || i.name.toLowerCase().includes(filter.toLowerCase())) && (!judged || itemProblem(kind, i)))
+  return (
+    <>
+      {problemsOnly && !hasStatus(kind) && <NoStatus what={kindLabel[kind]} />}
+      <Table label={kindLabel[kind]} filter={filter} problemsOnly={judged} head={[...cols.map((c) => c.head), '']} rows={shown.map((i) => [...cols.map((c) => c.cell(i)), <ActionsMenu label={`Actions for ${i.name}`} entries={entries(i)} />])} />
+    </>
+  )
+}
+
+export function NoStatus({ what }: { what: string }) {
+  return <p className="border-b border-line px-4 py-1.5 text-xs text-muted">{what} have no status of their own, so all of them are shown.</p>
 }
 
 /** A ConfigMap's keys and values, or a Secret's keys and sizes. */

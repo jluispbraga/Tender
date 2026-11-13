@@ -345,6 +345,102 @@ test.describe('F18 Kubernetes', () => {
     await expect(page.getByText(/Started job nightly-manual-\d+ from nightly\./).first()).toBeVisible()
   })
 
+  test('F18-H12 filter every list by name; a job opens its pod log', async ({ page, open, scan }) => {
+    await open('#/kubernetes')
+    const filter = page.getByRole('searchbox', { name: 'Filter by name' })
+    await filter.fill('WEB')
+    const pods = page.getByRole('table', { name: 'Pods' })
+    await expect(pods).toContainText('web-7d9f8b6c5-x2k4p')
+    await expect(pods).not.toContainText('worker-5c6d7f8-abcde')
+    await expect(page.getByRole('tab', { name: /^Pods/ })).toHaveText('Pods 1')
+    await scan('S29 filtered')
+    // The filter follows you to the other kinds.
+    await page.getByRole('tab', { name: 'ConfigMaps' }).click()
+    await expect(page.getByRole('table', { name: 'ConfigMaps' })).toContainText('web-config')
+    await page.getByRole('tab', { name: 'Secrets' }).click()
+    await expect(page.getByText('No secrets with “web” in the name.')).toBeVisible()
+    await filter.press('Escape')
+    await expect(page.getByRole('table', { name: 'Secrets' })).toContainText('db-password')
+    // A failed job: Logs opens the pod it ran.
+    await page.getByRole('tab', { name: 'Jobs', exact: true }).click()
+    await page.getByRole('button', { name: 'Actions for migrate-v42' }).click()
+    await page.getByRole('menuitem', { name: 'Logs' }).click()
+    await expect(page.getByRole('log', { name: 'Logs of migrate-v42-7xk2p' })).toContainText('migrate-v42-7xk2p line 1')
+    // A job whose pod is gone says why.
+    await page.getByRole('button', { name: 'Actions for nightly-29012345' }).click()
+    await page.getByRole('menuitem', { name: 'Logs' }).click()
+    await expect(page.getByText('nightly-29012345 has no pod left').first()).toBeVisible()
+  })
+
+  test('F18-H13 only problems: what is down, on every kind that has a status', async ({ page, open, scan }) => {
+    await open('#/kubernetes')
+    await expect(page.getByRole('table', { name: 'Pods' })).toContainText('coredns')
+    await page.getByRole('combobox', { name: 'Status' }).click()
+    await page.getByRole('option', { name: 'Only problems' }).click()
+    const pods = page.getByRole('table', { name: 'Pods' })
+    await expect(pods).toContainText('worker-5c6d7f8-abcde')
+    await expect(pods).toContainText('migrate-v42-7xk2p')
+    await expect(pods).not.toContainText('coredns')
+    await expect(pods).not.toContainText('web-7d9f8b6c5-x2k4p')
+    await expect(page.getByRole('tab', { name: /^Pods/ })).toHaveText('Pods 2')
+    await scan('S29 only problems')
+    await page.getByRole('tab', { name: /^Deployments/ }).click()
+    await expect(page.getByRole('table', { name: 'Deployments' })).toContainText('worker')
+    await expect(page.getByRole('table', { name: 'Deployments' })).not.toContainText('shop/web')
+    await page.getByRole('tab', { name: 'Jobs', exact: true }).click()
+    await expect(page.getByRole('table', { name: 'Jobs' })).toContainText('migrate-v42')
+    await expect(page.getByRole('table', { name: 'Jobs' })).not.toContainText('nightly-29012345')
+    // StatefulSets all ready: says so instead of an empty table.
+    await page.getByRole('tab', { name: 'StatefulSets' }).click()
+    await expect(page.getByText('No statefulsets with a problem. Everything here is running.')).toBeVisible()
+    // Kinds without a status stay whole, and say why.
+    await page.getByRole('tab', { name: 'ConfigMaps' }).click()
+    await expect(page.getByText('ConfigMaps have no status of their own, so all of them are shown.')).toBeVisible()
+    await expect(page.getByRole('table', { name: 'ConfigMaps' })).toContainText('web-config')
+  })
+
+  test('F18-H14 view the YAML of a pod and of a secret, values hidden', async ({ page, open, scan }) => {
+    await open('#/kubernetes')
+    await page.getByRole('button', { name: 'Actions for web-7d9f8b6c5-x2k4p' }).click()
+    await page.getByRole('menuitem', { name: 'View YAML' }).click()
+    const pod = page.getByRole('dialog', { name: 'web-7d9f8b6c5-x2k4p.yaml' })
+    await expect(pod.getByLabel('YAML', { exact: true })).toContainText('kind: Pod')
+    await expect(pod.getByRole('button', { name: 'Copy YAML' })).toBeVisible()
+    await scan('S29 yaml')
+    await pod.press('Escape')
+    await page.getByRole('tab', { name: 'Secrets' }).click()
+    await page.getByRole('button', { name: 'Actions for db-password' }).click()
+    await page.getByRole('menuitem', { name: 'View YAML' }).click()
+    const secret = page.getByRole('dialog', { name: 'db-password.yaml' })
+    await expect(secret).toContainText('the secret values are hidden')
+    await expect(secret.getByLabel('YAML', { exact: true })).toContainText('password: (hidden)')
+  })
+
+  test('F18-H15 the pod panel resizes by dragging or with the keyboard, and keeps its height', async ({ page, open, scan }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await open('#/kubernetes')
+    await page.getByRole('button', { name: 'Actions for worker-5c6d7f8-abcde' }).click()
+    await page.getByRole('menuitem', { name: 'Details and events' }).click()
+    const panel = page.getByRole('region', { name: 'Pod worker-5c6d7f8-abcde' })
+    const handle = page.getByRole('separator', { name: 'Resize pod panel' })
+    const h0 = (await panel.boundingBox())!.height
+    const b = (await handle.boundingBox())!
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(b.x + b.width / 2, b.y - 150, { steps: 5 })
+    await page.mouse.up()
+    const h1 = (await panel.boundingBox())!.height
+    expect(h1 - h0).toBeGreaterThan(130)
+    await handle.focus()
+    await page.keyboard.press('ArrowDown')
+    await expect.poll(async () => (await panel.boundingBox())!.height).toBe(h1 - 20)
+    await scan('S29 resized panel')
+    // Closing and opening another pod keeps the height.
+    await page.getByRole('button', { name: 'Close pod panel' }).click()
+    await page.getByRole('button', { name: 'Logs of web-7d9f8b6c5-x2k4p' }).click()
+    await expect.poll(async () => (await page.getByRole('region', { name: 'Pod web-7d9f8b6c5-x2k4p' }).boundingBox())!.height).toBe(h1 - 20)
+  })
+
   test('F18-E1 a cluster that is not running says so', async ({ page, open }) => {
     await open('#/containers')
     await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /Kubernetes/ }).click()

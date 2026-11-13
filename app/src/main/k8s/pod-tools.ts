@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:net'
 import { PassThrough } from 'node:stream'
 import * as k8s from '@kubernetes/client-node'
-import type { KubeForward, KubePodDetails } from '../../renderer/src/api/types'
+import type { KubeForward, KubeForwardSpec, KubePodDetails } from '../../renderer/src/api/types'
 import { forContext, quick, reason } from './kube'
 
 // What a developer reaches for after seeing a pod in the list: why it is not
@@ -115,6 +115,27 @@ interface Live {
 const forwards = new Map<string, Live>()
 let nextId = 1
 
+// Every start and stop the user makes is saved, so the forwards come back when Tender
+// opens again. Quitting closes them without saving, which keeps the list.
+let save: (specs: KubeForwardSpec[]) => void = () => {}
+export const onForwardsChanged = (f: typeof save) => (save = f)
+const saveNow = () => save([...forwards.values()].map(({ info: { context, kind, namespace, name, port, localPort } }) => ({ context, kind, namespace, name, port, localPort })))
+
+/**
+ * Starts the saved forwards again. Any that cannot start (the cluster is off, the pod
+ * was replaced, the port is taken) is reported and dropped from the list.
+ */
+export async function restoreForwards(specs: KubeForwardSpec[], onFailed: (spec: KubeForwardSpec, why: string) => void) {
+  for (const s of specs) {
+    try {
+      await startForward(s.context, s.kind, s.namespace, s.name, s.port, s.localPort)
+    } catch (e) {
+      onFailed(s, (e as Error).message)
+    }
+  }
+  saveNow()
+}
+
 export const listForwards = (): KubeForward[] => [...forwards.values()].map((f) => f.info)
 
 /** The pod port behind a service port, resolving a named targetPort on one of its pods. */
@@ -162,6 +183,7 @@ export async function startForward(context: string, kind: 'pod' | 'service', nam
   const actual = (server.address() as { port: number }).port
   const info: KubeForward = { id: String(nextId++), context, kind, namespace, name, port, localPort: actual, startedAt: new Date().toISOString() }
   forwards.set(info.id, { info, server })
+  saveNow()
   return info
 }
 
@@ -170,4 +192,5 @@ export function stopForward(id: string) {
   if (!f) return
   f.server.close()
   forwards.delete(id)
+  saveNow()
 }

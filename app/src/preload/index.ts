@@ -67,6 +67,7 @@ const tender: TenderApi = {
     act: (c, a) => call('kube.act', c, a),
     list: (c, n, k) => call('kube.list', c, n, k),
     data: (c, n, k, name) => call('kube.data', c, n, k, name),
+    yaml: (c, k, n, name) => call('kube.yaml', c, k, n, name),
     sources: () => call('kube.sources'),
     podDetails: (c, n, p) => call('kube.podDetails', c, n, p),
     forwards: () => call('kube.forwards'),

@@ -190,6 +190,8 @@ export interface Settings {
   kube_sources: string[]
   /** The user's name and environment per context, by KubeContext.key. The kubeconfig is never edited. */
   kube_labels: Record<string, { name?: string; env?: KubeEnv }>
+  /** Port forwards to start again when Tender opens. */
+  kube_forwards: KubeForwardSpec[]
 }
 
 /** Settings › Kubernetes: what each kubeconfig source brings in. */
@@ -329,7 +331,7 @@ export interface TenderApi {
     podDetails(context: string, namespace: string, pod: string): Promise<KubePodDetails>
     /** A shell in a pod's container (same session shape as a container terminal). */
     exec(context: string, namespace: string, pod: string, container: string, opts: { shell: 'auto' | '/bin/sh' | '/bin/bash'; cols: number; rows: number }, onData: (d: string) => void, onExit: (code: number) => void): Promise<ExecSession>
-    /** Port forwards running now (they stop when Tender quits). */
+    /** Port forwards running now (saved: they start again when Tender opens). */
     forwards(): Promise<KubeForward[]>
     /** Listens on 127.0.0.1:localPort (0: any free port) and tunnels to the pod or service port. */
     startForward(context: string, target: { kind: 'pod' | 'service'; namespace: string; name: string; port: number }, localPort: number): Promise<KubeForward>
@@ -342,6 +344,8 @@ export interface TenderApi {
     list(context: string, namespace: string, kind: KubeKind): Promise<KubeItem[]>
     /** The keys of a ConfigMap (with values) or a Secret (names and sizes only). */
     data(context: string, namespace: string, kind: 'configmaps' | 'secrets', name: string): Promise<KubeData>
+    /** kubectl get -o yaml, without managedFields; a Secret's values are blanked. */
+    yaml(context: string, kind: 'pods' | 'deployments' | 'services' | KubeKind, namespace: string, name: string): Promise<string>
   }
   /** Windows: WSL's memory and disks, and the settings that keep them in check. */
   resources: {
@@ -432,6 +436,16 @@ export interface KubeForward {
   startedAt: string
 }
 
+/** What a port forward needs to start again: the target and the local port. */
+export interface KubeForwardSpec {
+  context: string
+  kind: 'pod' | 'service'
+  namespace: string
+  name: string
+  port: number
+  localPort: number
+}
+
 export type KubeAction =
   | { kind: 'delete-pod' | 'delete-deployment' | 'delete-service' | 'restart-deployment'; namespace: string; name: string }
   | { kind: 'scale-deployment'; namespace: string; name: string; replicas: number }
@@ -463,7 +477,7 @@ export interface KubeData {
 }
 
 export interface KubeOverview {
-  pods: { name: string; namespace: string; status: string; ready: string; restarts: number; node?: string; containers: string[]; /** Declared container ports, for forwarding. */ ports: number[]; createdAt?: string }[]
+  pods: { name: string; namespace: string; status: string; ready: string; restarts: number; node?: string; containers: string[]; /** Declared container ports, for forwarding. */ ports: number[]; createdAt?: string; /** What made it: a Job, ReplicaSet, StatefulSet... */ owner?: { kind: string; name: string } }[]
   deployments: { name: string; namespace: string; ready: string; replicas: number; upToDate: number; images: string[]; createdAt?: string }[]
   services: { name: string; namespace: string; type: string; clusterIP: string; ports: string[]; /** Plain port numbers, for forwarding. */ portNumbers: number[] }[]
 }
