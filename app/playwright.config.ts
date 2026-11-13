@@ -10,7 +10,8 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   timeout: 30_000,
   expect: { timeout: 6_000 },
-  reporter: [['list'], ['json', { outputFile: 'playwright-report/results.json' }]],
+  // On CI, failures also show as annotations on the run page (readable without signing in).
+  reporter: [['list'], ['json', { outputFile: 'playwright-report/results.json' }], ...(process.env.CI ? [['github'] as const] : [])],
   use: {
     baseURL: 'http://localhost:5174',
     // The installed Chrome; no browser download needed.

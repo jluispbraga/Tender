@@ -126,10 +126,11 @@ describe.skipIf(!ctx)('Kubernetes, against a real cluster', { timeout: 120_000 }
     expect(before[0].current).toBe(true)
     const older = before.find((r) => !r.current)!
     expect(await actMore(c, { kind: 'rollback-deployment', namespace: ns, name: 'web', revision: older.revision })).toContain(`back to revision ${older.revision}`)
-    // kubectl's behaviour: the old ReplicaSet becomes the newest revision.
+    // kubectl's behaviour: the old ReplicaSet becomes the newest revision. The ReplicaSet
+    // gets its new number a moment before the deployment does: wait for both.
     const after = await until('the rollback to land', async () => {
       const r = await rollouts(c, ns, 'web')
-      return r[0].revision > before[0].revision && r
+      return r[0].revision > before[0].revision && r[0].current && r
     })
     expect(after[0].current).toBe(true)
     expect(after[0].images).toEqual(older.images)
