@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { TenderApi, LayerProgress } from '../renderer/src/api/types'
+import type { TenderApi, LayerProgress, BuildEvent, ScanPhase, ScanResult } from '../renderer/src/api/types'
 
 // window.tender: the real implementation of TenderApi, over IPC. The renderer
 // gets these functions and nothing else; no Node, no ipcRenderer.
@@ -170,12 +170,100 @@ const tender: TenderApi = {
     remove: (ids, force) => call('images.remove', ids, force),
     prune: (scope) => call('images.prune', scope),
     run: (spec) => call('images.run', spec),
+    tag: (id, reference) => call('images.tag', id, reference),
+    push: (reference, onProgress) => {
+      let settle: { resolve: () => void; reject: (e: unknown) => void }
+      const done = new Promise<void>((resolve, reject) => (settle = { resolve, reject }))
+      const s = subscribe('push', [reference], (p: { type: 'progress'; layers: LayerProgress[] } | { type: 'done' } | { type: 'error'; message: string; status?: number }) => {
+        if (p.type === 'progress') onProgress(p.layers)
+        else if (p.type === 'done') (handlers.delete(s.id), settle.resolve())
+        else (handlers.delete(s.id), settle.reject(apiError(p.message, p.status)))
+      })
+      s.ready.catch((e) => settle.reject(e))
+      return { pullId: s.id, done }
+    },
+    cancelPush: (pushId) => call('images.cancelPush', pushId),
+    scan: (reference, onPhase) => {
+      let settle: { resolve: (r: ScanResult) => void; reject: (e: unknown) => void }
+      const done = new Promise<ScanResult>((resolve, reject) => (settle = { resolve, reject }))
+      const s = subscribe('scan', [reference], (p: { type: 'phase'; phase: ScanPhase } | { type: 'done'; result: ScanResult } | { type: 'error'; message: string; status?: number }) => {
+        if (p.type === 'phase') onPhase(p.phase)
+        else if (p.type === 'done') (handlers.delete(s.id), settle.resolve(p.result))
+        else (handlers.delete(s.id), settle.reject(apiError(p.message, p.status)))
+      })
+      s.ready.catch((e) => settle.reject(e))
+      return { scanId: s.id, done }
+    },
+    cancelScan: (scanId) => call('images.cancelScan', scanId),
+    openAdvisory: (id, url) => call('images.openAdvisory', id, url),
+  },
+  composeFiles: {
+    list: () => call('composeFiles.list'),
+    get: (path) => call('composeFiles.get', path),
+    add: () => call('composeFiles.add'),
+    forget: (path) => call('composeFiles.forget', path),
+    run: (path, command, service, onLines) => {
+      let settle: { resolve: () => void; reject: (e: unknown) => void }
+      const done = new Promise<void>((resolve, reject) => (settle = { resolve, reject }))
+      const s = subscribe('compose', [path, command, service ?? null], (p: { type: 'lines'; lines: string[] } | { type: 'done' } | { type: 'error'; message: string; status?: number }) => {
+        if (p.type === 'lines') onLines(p.lines)
+        else if (p.type === 'done') (handlers.delete(s.id), settle.resolve())
+        else (handlers.delete(s.id), settle.reject(apiError(p.message, p.status)))
+      })
+      s.ready.catch((e) => settle.reject(e))
+      return { runId: s.id, done }
+    },
+    cancel: (runId) => call('composeFiles.cancel', runId),
+    readEnv: (path) => call('composeFiles.readEnv', path),
+    writeEnv: (path, text) => call('composeFiles.writeEnv', path, text),
+  },
+  builds: {
+    pickContext: () => call('builds.pickContext'),
+    start: (spec, onEvent) => {
+      let settle: { resolve: (v: { imageId: string }) => void; reject: (e: unknown) => void }
+      const done = new Promise<{ imageId: string }>((resolve, reject) => (settle = { resolve, reject }))
+      const s = subscribe('build', [spec], (p: BuildEvent | { type: 'done'; imageId: string } | { type: 'error'; message: string; status?: number }) => {
+        if (p.type === 'done') (handlers.delete(s.id), settle.resolve({ imageId: p.imageId }))
+        else if (p.type === 'error') (handlers.delete(s.id), settle.reject(apiError(p.message, p.status)))
+        else onEvent(p)
+      })
+      s.ready.catch((e) => settle.reject(e))
+      return { buildId: s.id, done }
+    },
+    cancel: (buildId) => call('builds.cancel', buildId),
+  },
+  tunnels: {
+    list: () => call('tunnels.list'),
+    open: (containerId, port) => call('tunnels.open', containerId, port),
+    close: (id) => call('tunnels.close', id),
+    visit: (url) => call('tunnels.visit', url),
+  },
+  files: {
+    list: (id, path) => call('files.list', id, path),
+    download: (id, path, isDir) => call('files.download', id, path, isDir),
+    upload: (id, dir) => call('files.upload', id, dir),
+    changes: (id) => call('files.changes', id),
+  },
+  registries: {
+    list: () => call('registries.list'),
+    login: (server, username, password) => call('registries.login', server, username, password),
+    logout: (server) => call('registries.logout', server),
   },
   volumes: {
     list: () => call('volumes.list'),
     create: (name) => call('volumes.create', name),
     remove: (names) => call('volumes.remove', names),
     usage: (name) => call('volumes.usage', name),
+    exportTo: (name) => call('volumes.exportTo', name),
+    restoreFrom: (name) => call('volumes.restoreFrom', name),
+  },
+  networks: {
+    list: () => call('networks.list'),
+    create: (spec) => call('networks.create', spec),
+    remove: (ids) => call('networks.remove', ids),
+    members: (id) => call('networks.members', id),
+    connect: (id, containerId) => call('networks.connect', id, containerId),
+    disconnect: (id, containerId) => call('networks.disconnect', id, containerId),
   },
   settings: {
     get: () => call('settings.get'),

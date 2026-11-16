@@ -40,6 +40,7 @@ export function ProjectDetail({ name }: { name: string }) {
   const runningCount = rows.filter((r) => r.state === 'running').length
   const ids = rows.map((r) => r.id)
   const workingDir = rows[0].labels['com.docker.compose.project.working_dir']
+  const composeFile = rows[0].labels['com.docker.compose.project.config_files']?.split(',')[0]
 
   return (
     <>
@@ -72,6 +73,14 @@ export function ProjectDetail({ name }: { name: string }) {
       {workingDir && (
         <p className="shrink-0 border-b border-line px-5 py-2 text-sm text-muted">
           Started from <span className="font-mono text-xs text-fg">{workingDir}</span>
+          {composeFile && (
+            <>
+              {' · '}
+              <a href={href('compose', composeFile)} className="font-medium text-link underline-offset-2 hover:underline">
+                Open its Compose file
+              </a>
+            </>
+          )}
         </p>
       )}
 

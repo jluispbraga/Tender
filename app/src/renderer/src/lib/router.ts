@@ -10,6 +10,12 @@ import { useSyncExternalStore } from 'react'
 //   #/images/:id                       S12
 //   #/volumes                          S15
 //   #/volumes/:name/:tab               S16 (containers | data)
+//   #/compose                          Compose files, added or found from running projects
+//   #/compose/:path                    one file: its services, commands and .env
+//   #/builds                           image builds started in this window
+//   #/builds/:id                       one build's steps and log
+//   #/networks                         networks and their address ranges
+//   #/networks/:id                     one network and the containers on it
 //   #/settings/:section                S21, S22 (general | engine)
 //   #/troubleshoot                     S23
 //   #/notifications                    S24

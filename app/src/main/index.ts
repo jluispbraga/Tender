@@ -1,8 +1,10 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { app, BrowserWindow, Menu, nativeImage, nativeTheme, session, Tray, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, Menu, nativeImage, nativeTheme, Notification, session, shell, Tray, type IpcMainInvokeEvent } from 'electron'
 import { Store } from './db'
 import { Engine } from './engine/engine'
+import { startAlerts } from './alerts'
+import type { ContainerRow } from '../renderer/src/api/types'
 import { registerIpc } from './ipc'
 import { PipeShare } from './tools/windows-tools'
 import { startUpdates } from './updates'
@@ -28,6 +30,8 @@ guardMainProcess(join(app.getPath('userData'), 'logs'))
 
 let win: BrowserWindow | null = null
 let tray: Tray | null = null
+/** The containers the tray menu lists, refreshed on engine events. */
+let trayContainers: ContainerRow[] = []
 let quitting = false
 
 const store = new Store(process.env.TENDER_DB_PATH || join(app.getPath('userData'), 'tender.db'))
@@ -92,6 +96,42 @@ function showWindow(hash?: string) {
 
 // ---- tray (S25) ---------------------------------------------------------------------
 
+const TRAY_MAX = 15
+
+/** One submenu per container: running ones first, then the most recent. */
+function trayContainerItems(): Electron.MenuItemConstructorOptions[] {
+  const sorted = [...trayContainers].sort((a, b) => Number(b.state === 'running') - Number(a.state === 'running') || b.createdAt.localeCompare(a.createdAt))
+  const act = (c: ContainerRow, a: 'start' | 'stop' | 'restart') => () => void engine.containerAction([c.id], a).finally(() => void refreshTray())
+  const items = sorted.slice(0, TRAY_MAX).map((c): Electron.MenuItemConstructorOptions => {
+    const live = c.state === 'running'
+    const ports = c.ports.filter((p) => p.publicPort && p.protocol === 'tcp')
+    return {
+      label: `${live ? '●' : '○'}  ${c.name.length > 40 ? c.name.slice(0, 39) + '…' : c.name}`,
+      submenu: [
+        live ? { label: 'Stop', click: act(c, 'stop') } : { label: 'Start', click: act(c, 'start') },
+        { label: 'Restart', enabled: live, click: act(c, 'restart') },
+        { label: 'Logs', click: () => showWindow(`#/containers/${c.id}/logs`) },
+        ...(live && ports.length
+          ? ([{ type: 'separator' }, ...[...new Set(ports.map((p) => p.publicPort!))].map((port) => ({ label: `Open localhost:${port}`, click: () => void shell.openExternal(`http://localhost:${port}`) }))] as Electron.MenuItemConstructorOptions[])
+          : []),
+      ],
+    }
+  })
+  if (sorted.length > TRAY_MAX) items.push({ label: `All ${sorted.length} containers…`, click: () => showWindow('#/containers') })
+  return items.length ? items : [{ label: 'No containers', enabled: false }]
+}
+
+let trayTimer: NodeJS.Timeout | undefined
+/** Rebuilds the tray menu with fresh containers, at most every 1.5 s. */
+function refreshTray() {
+  clearTimeout(trayTimer)
+  trayTimer = setTimeout(async () => {
+    if (!tray) return
+    trayContainers = engine.getStatus().state === 'running' ? await engine.listContainers().catch(() => []) : []
+    tray?.setContextMenu(trayMenu())
+  }, 1500)
+}
+
 function trayMenu() {
   const s = engine.getStatus()
   const label = { running: `Engine running${s.version ? ` · v${s.version}` : ''}`, starting: 'Engine starting…', stopped: 'Engine stopped', error: 'Engine unreachable' }[s.state]
@@ -99,7 +139,7 @@ function trayMenu() {
     { label, enabled: false },
     { type: 'separator' },
     { label: 'Open Tender', click: () => showWindow() },
-    { label: 'Containers', click: () => showWindow('#/containers') },
+    { label: 'Containers', submenu: trayContainerItems() },
     { label: 'Images', click: () => showWindow('#/images') },
     { label: 'Reconnect to the engine', click: () => void engine.reconnect() },
     { type: 'separator' },
@@ -121,6 +161,7 @@ function setupTray(enabled: boolean) {
   tray.setToolTip('Tender')
   tray.setContextMenu(trayMenu())
   tray.on('click', () => showWindow())
+  refreshTray()
 }
 
 // ---- settings with OS side effects -----------------------------------------------------
@@ -158,7 +199,8 @@ app.on('second-instance', () => showWindow())
 
 app.whenReady().then(() => {
   // No camera, mic, notifications-permission or anything else for web content.
-  session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false))
+  // Writing to the clipboard is the one exception: every Copy button needs it.
+  session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(perm === 'clipboard-sanitized-write'))
   // CSP for the packaged renderer (the dev server's HMR needs its own websocket).
   if (!devUrl) {
     session.defaultSession.webRequest.onHeadersReceived((details, cb) =>
@@ -174,6 +216,19 @@ app.whenReady().then(() => {
 
   const ipc = registerIpc({ engine, store, onSettingChanged, isTrustedSender: trusted, share, beforeUpdateQuit: () => (quitting = true) })
   setCrashNotify(ipc.notify)
+  startAlerts(
+    engine,
+    (n) => {
+      ipc.notify(n)
+      // In the window, the notification bell is enough; away from it, tell the system.
+      if (Notification.isSupported() && !win?.isFocused()) {
+        const note = new Notification({ title: n.title, body: n.body ?? '' })
+        note.on('click', () => showWindow(n.objectType === 'container' && n.objectId ? `#/containers/${n.objectId}/logs` : process.platform === 'win32' ? '#/resources' : undefined))
+        note.show()
+      }
+    },
+    () => store.settings().alerts,
+  )
   startUpdates(settings.check_updates)
   setKubeSources(settings.kube_sources)
   onForwardsChanged((specs) => store.setSetting('kube_forwards', specs))
@@ -181,7 +236,9 @@ app.whenReady().then(() => {
     void restoreForwards(settings.kube_forwards, (s, why) =>
       ipc.notify({ kind: 'error', title: `Port forward localhost:${s.localPort} did not come back`, body: `${s.kind} ${s.namespace}/${s.name}:${s.port} in ${s.context}: ${why} Start it again from Kubernetes if you still need it.` }),
     )
+  engine.onEvents((evs) => evs.some((e) => e.type === 'container') && refreshTray())
   engine.onStatus(() => {
+    refreshTray()
     tray?.setContextMenu(trayMenu())
     void share.sync(store.settings().share_docker_pipe)
   })
@@ -228,8 +285,16 @@ app.whenReady().then(() => {
   }
 })
 
-app.on('before-quit', () => {
+let tunnelsClosed = false
+app.on('before-quit', (e) => {
   quitting = true
+  // Public links close with the app. Wait for that (briefly) before quitting.
+  if (!tunnelsClosed) {
+    e.preventDefault()
+    tunnelsClosed = true
+    void Promise.race([engine.closeAllTunnels().catch(() => undefined), new Promise((r) => setTimeout(r, 4000))]).then(() => app.quit())
+    return
+  }
   share.close()
   engine.stop()
 })

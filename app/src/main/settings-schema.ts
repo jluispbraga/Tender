@@ -13,6 +13,7 @@ export const settingValue = {
   tray_enabled: z.boolean(),
   share_docker_pipe: z.boolean(),
   check_updates: z.boolean(),
+  alerts: z.boolean(),
   kube_sources: z.array(z.string().min(1).max(1000)).max(50),
   kube_labels: z
     .record(z.string().min(1).max(1300), z.object({ name: z.string().trim().max(60).optional(), env: z.enum(['local', 'dev', 'qa', 'prod']).optional() }))

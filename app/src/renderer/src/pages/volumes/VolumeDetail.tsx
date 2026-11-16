@@ -1,8 +1,11 @@
-import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Database } from 'lucide-react'
+import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArchiveRestore, ArrowLeft, Database, HardDriveDownload } from 'lucide-react'
 import { api } from '@/api'
 import { PageHeader } from '@/app/AppShell'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/dialog'
+import { useToast } from '@/components/ui/toast'
 import { EmptyState } from '@/components/ui/empty-state'
 import { ErrorState } from '@/components/ui/error-state'
 import { StatusChip } from '@/components/ui/status-chip'
@@ -15,6 +18,33 @@ import { href, navigate } from '@/lib/router'
 export function VolumeDetail({ name, tab }: { name: string; tab: string }) {
   const volumes = useVolumes()
   const v = volumes.data?.find((x) => x.name === name)
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [backingUp, setBackingUp] = useState(false)
+  const [confirmRestore, setConfirmRestore] = useState(false)
+
+  const backup = async () => {
+    setBackingUp(true)
+    try {
+      const r = await api.volumes.exportTo(name)
+      if (r) toast({ kind: 'success', title: `Backed up ${name}`, body: `${r.file} (${bytes(r.bytes)})` })
+    } catch (e) {
+      toast({ kind: 'error', title: `Couldn’t back up ${name}`, body: (e as Error).message })
+    } finally {
+      setBackingUp(false)
+    }
+  }
+
+  const restore = async () => {
+    try {
+      const r = await api.volumes.restoreFrom(name)
+      if (r) toast({ kind: 'success', title: `Restored ${name}`, body: `From ${r.file}.` })
+    } catch (e) {
+      toast({ kind: 'error', title: `Couldn’t restore ${name}`, body: (e as Error).message })
+    } finally {
+      void qc.invalidateQueries({ queryKey: keys.volumes })
+    }
+  }
 
   if (volumes.isError) return <ErrorState what="this volume" error={volumes.error} onRetry={() => void volumes.refetch()} />
   if (volumes.isPending) return <p role="status" className="p-5 text-base text-muted">Loading volume…</p>
@@ -34,6 +64,22 @@ export function VolumeDetail({ name, tab }: { name: string; tab: string }) {
             <StatusChip status={v.usedBy.length ? 'in-use' : 'unused'} />
           </span>
         }
+      >
+        <Button icon={<HardDriveDownload />} loading={backingUp} onClick={() => void backup()}>
+          Back up
+        </Button>
+        <Button icon={<ArchiveRestore />} onClick={() => setConfirmRestore(true)}>
+          Restore…
+        </Button>
+      </PageHeader>
+      <ConfirmDialog
+        open={confirmRestore}
+        onOpenChange={setConfirmRestore}
+        title={`Restore ${v.name} from a backup?`}
+        items={[v.name]}
+        impact="You pick a .tar.gz next. Files in the backup replace the ones with the same name; other files stay. Containers using the volume must be stopped first."
+        confirmLabel="Choose backup…"
+        onConfirm={restore}
       />
       <dl className="flex shrink-0 flex-wrap gap-x-6 gap-y-1 border-b border-line px-5 py-2 text-sm">
         <div className="flex gap-2">

@@ -11,10 +11,12 @@ import { api, type Settings } from '@/api'
 import { WindowsTools } from './WindowsTools'
 import { Updates } from './Updates'
 import { KubeSources } from './KubeSources'
+import { Registries } from './Registries'
 
 const sections = [
   { key: 'general', label: 'General' },
   { key: 'engine', label: 'Engine' },
+  { key: 'registries', label: 'Registries' },
 ]
 
 /** S21 (General) and S22 (Engine). Changes apply immediately; there is no Apply button. */
@@ -35,7 +37,7 @@ export function SettingsPage({ section }: { section: string }) {
             </a>
           ))}
         </nav>
-        <div className="min-w-0 flex-1 overflow-auto p-6">{section === 'engine' ? <EngineSection /> : <GeneralSection />}</div>
+        <div className="min-w-0 flex-1 overflow-auto p-6">{section === 'engine' ? <EngineSection /> : section === 'registries' ? <RegistriesSection /> : <GeneralSection />}</div>
       </div>
     </>
   )
@@ -96,6 +98,13 @@ function GeneralSection() {
         <Switch label="Start Tender when I sign in" checked={s.start_on_login} onCheckedChange={(v) => void save('start_on_login', v)} />
         <Switch label="Open the window when Tender starts" checked={s.open_on_start} onCheckedChange={(v) => void save('open_on_start', v)} />
         <Switch label={`Keep running in the ${api.platform === 'darwin' ? 'menu bar' : api.platform === 'win32' ? 'notification area' : 'system tray'} when the window is closed`} checked={s.tray_enabled} onCheckedChange={(v) => void save('tray_enabled', v)} />
+      </Group>
+      <Group title="Alerts">
+        <Switch label="Tell me when a container runs out of memory or keeps restarting" checked={s.alerts} onCheckedChange={(v) => void save('alerts', v)} />
+        <p className="text-sm text-muted">
+          They go to Notifications, and to {api.platform === 'win32' ? 'Windows' : 'system'} notifications when Tender isn’t in front.
+          {api.platform === 'win32' ? ' Tender also says when WSL holds more than 10 GB of disk space that Docker no longer uses.' : ''}
+        </p>
       </Group>
       <Group title="Updates">
         <Updates settings={s} save={save} />
@@ -166,6 +175,16 @@ function EngineSection() {
       <p className="text-sm text-muted">
         Tender uses an engine you already run. Connecting to other engines and editing the engine’s configuration file are planned for a later milestone.
       </p>
+    </div>
+  )
+}
+
+function RegistriesSection() {
+  return (
+    <div className="flex max-w-xl flex-col gap-8">
+      <Group title="Registry logins">
+        <Registries />
+      </Group>
     </div>
   )
 }

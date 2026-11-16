@@ -20,6 +20,7 @@ const changed: Settings = {
   tray_enabled: false,
   share_docker_pipe: false,
   check_updates: false,
+  alerts: false,
   kube_sources: ['C:\\Users\\you\\.kube\\prod'],
   kube_labels: { 'c:\\users\\you\\.kube\\prod\\flake-prod-kubeconfig#microk8s': { name: 'Flake prod', env: 'prod' } },
   kube_forwards: [{ context: 'minikube', kind: 'service', namespace: 'default', name: 'web', port: 80, localPort: 8088 }],

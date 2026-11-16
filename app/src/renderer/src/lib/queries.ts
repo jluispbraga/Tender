@@ -18,6 +18,8 @@ export const keys = {
   diskUsage: ['diskUsage'] as const,
   volumes: ['volumes'] as const,
   volumeUsage: (name: string) => ['volumeUsage', name] as const,
+  networks: ['networks'] as const,
+  networkMembers: (id: string) => ['networkMembers', id] as const,
   settings: ['settings'] as const,
   grid: (v: GridView) => ['grid', v] as const,
   notifications: ['notifications'] as const,
@@ -28,6 +30,7 @@ export const useEngine = () => useQuery({ queryKey: keys.engine, queryFn: api.en
 export const useContainers = () => useQuery({ queryKey: keys.containers, queryFn: api.containers.list })
 export const useImages = () => useQuery({ queryKey: keys.images, queryFn: api.images.list })
 export const useVolumes = () => useQuery({ queryKey: keys.volumes, queryFn: api.volumes.list })
+export const useNetworks = () => useQuery({ queryKey: keys.networks, queryFn: api.networks.list })
 export const useSettings = () => useQuery({ queryKey: keys.settings, queryFn: api.settings.get })
 export const useNotifications = () => useQuery({ queryKey: keys.notifications, queryFn: api.notifications.list })
 
@@ -51,12 +54,21 @@ export function useEngineEvents() {
         qc.invalidateQueries({ queryKey: keys.images })
         qc.invalidateQueries({ queryKey: keys.volumes })
         qc.invalidateQueries({ queryKey: ['volumeUsage'] })
+        qc.invalidateQueries({ queryKey: keys.networks })
+        qc.invalidateQueries({ queryKey: ['networkMembers'] })
+        qc.invalidateQueries({ queryKey: ['composeFiles'] })
+        qc.invalidateQueries({ queryKey: ['composeFile'] })
+        qc.invalidateQueries({ queryKey: ['tunnels'] })
       }
       if (types.has('image')) {
         qc.invalidateQueries({ queryKey: keys.images })
         qc.invalidateQueries({ queryKey: keys.diskUsage })
       }
       if (types.has('volume')) qc.invalidateQueries({ queryKey: keys.volumes })
+      if (types.has('network')) {
+        qc.invalidateQueries({ queryKey: keys.networks })
+        qc.invalidateQueries({ queryKey: ['networkMembers'] })
+      }
     }
     const offEvents = api.engine.onEvents((events) => {
       pending.push(...events)

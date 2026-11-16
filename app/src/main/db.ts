@@ -25,6 +25,7 @@ export const defaultSettings: Settings = {
   tray_enabled: true,
   share_docker_pipe: true,
   check_updates: true,
+  alerts: true,
   kube_sources: [],
   kube_labels: {},
   kube_forwards: [],

@@ -30,7 +30,7 @@ test.describe('F03 pull an image', () => {
   test('F03-N2 a private image says to log in', async ({ page, open }) => {
     await open('#/images')
     const dialog = await startPull(page, 'private/app:1')
-    await expect(dialog.getByText(/docker login/)).toBeVisible()
+    await expect(dialog.getByText(/Settings › Registries/)).toBeVisible()
   })
 
   test('F03-N3 a malformed reference is refused', async ({ page, open }) => {

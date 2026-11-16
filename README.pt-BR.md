@@ -114,6 +114,12 @@ No Linux, torne o AppImage executável antes: `chmod +x Tender-*.AppImage`.
 - Criar e remover volumes.
 - Ver quais containers usam um volume antes de apagá-lo.
 
+### Networks
+- Listar as redes com driver, subnet e os containers de cada uma.
+- Ver o IP de cada container e os nomes pelos quais os outros containers o alcançam.
+- Criar redes bridge (internas, se quiser, com subnet e gateway próprios), conectar e desconectar containers.
+- Remover redes sem uso; as redes nativas do Docker e as que estão em uso são mantidas.
+
 ### Além do Docker Desktop
 - **Kubernetes:** pods, deployments, services, StatefulSets, jobs, CronJobs, ingresses, ConfigMaps e secrets (só os nomes das chaves) para todo contexto do seu kubeconfig (kind, k3d, minikube, qualquer cluster que o kubectl alcance). Filtre por nome ou mostre só o que está fora do ar, os eventos do namespace, CPU e memória por pod (com metrics-server), o YAML de qualquer recurso, o histórico de rollouts com rollback, logs ao vivo que você pode buscar e salvar (de um pod, de um job ou de todos os pods de um deployment de uma vez), detalhes e eventos do pod, um terminal no pod e port forwards que voltam quando o Tender abre. Reinicie ou escale um deployment ou StatefulSet, rode ou pause um CronJob, apague qualquer coisa; exclusões sempre pedem confirmação e mostram o contexto, e clusters de produção pedem confirmação antes de toda mudança.
 - **Debug shell:** um shell BusyBox que entra nos processos e na rede de um container em execução, para imagens sem shell próprio (distroless, scratch). O container não é alterado.

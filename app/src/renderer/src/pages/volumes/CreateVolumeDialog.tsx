@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus } from 'lucide-react'
+import { ArchiveRestore, Plus } from 'lucide-react'
 import { api } from '@/api'
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/dialog'
@@ -19,6 +19,26 @@ export function CreateVolumeDialog({ open, onClose }: { open: boolean; onClose: 
       setError(null)
     }
   }, [open])
+
+  /** Creates the volume from a backup file: the main process asks for the file. */
+  const fromBackup = async () => {
+    if (!name.trim()) {
+      setError('Give the volume a name.')
+      return
+    }
+    setBusy(true)
+    try {
+      const r = await api.volumes.restoreFrom(name.trim())
+      if (r) {
+        toast({ kind: 'success', title: `Created ${name.trim()} from a backup`, body: r.file })
+        onClose()
+      }
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const submit = async () => {
     if (!name.trim()) {
@@ -47,6 +67,9 @@ export function CreateVolumeDialog({ open, onClose }: { open: boolean; onClose: 
         <>
           <Button onClick={onClose} disabled={busy}>
             Cancel
+          </Button>
+          <Button icon={<ArchiveRestore />} disabled={busy} onClick={() => void fromBackup()}>
+            From a backup…
           </Button>
           <Button variant="primary" icon={<Plus />} loading={busy} onClick={() => void submit()}>
             Create
