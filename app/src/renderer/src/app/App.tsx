@@ -25,6 +25,10 @@ const ImagesPage = named(() => import('@/pages/images/ImagesPage'), 'ImagesPage'
 const ImageDetail = named(() => import('@/pages/images/ImageDetail'), 'ImageDetail')
 const VolumesPage = named(() => import('@/pages/volumes/VolumesPage'), 'VolumesPage')
 const VolumeDetail = named(() => import('@/pages/volumes/VolumeDetail'), 'VolumeDetail')
+const ComposePage = named(() => import('@/pages/compose/ComposePage'), 'ComposePage')
+const BuildsPage = named(() => import('@/pages/builds/BuildsPage'), 'BuildsPage')
+const NetworksPage = named(() => import('@/pages/networks/NetworksPage'), 'NetworksPage')
+const NetworkDetail = named(() => import('@/pages/networks/NetworkDetail'), 'NetworkDetail')
 const SettingsPage = named(() => import('@/pages/settings/SettingsPage'), 'SettingsPage')
 const TroubleshootPage = named(() => import('@/pages/troubleshoot/TroubleshootPage'), 'TroubleshootPage')
 const NotificationsPage = named(() => import('@/pages/notifications/NotificationsPage'), 'NotificationsPage')
@@ -75,6 +79,15 @@ function Root() {
       break
     case 'volumes':
       page = a ? <VolumeDetail name={a} tab={b ?? 'containers'} /> : <VolumesPage />
+      break
+    case 'compose':
+      page = <ComposePage path={a} />
+      break
+    case 'builds':
+      page = <BuildsPage id={a} />
+      break
+    case 'networks':
+      page = a ? <NetworkDetail id={a} /> : <NetworksPage />
       break
     case 'settings':
       page = <SettingsPage section={a ?? 'general'} />

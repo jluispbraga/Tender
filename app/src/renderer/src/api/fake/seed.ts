@@ -1,4 +1,4 @@
-import type { ContainerRow, ImageLayer, ImageRow, VolumeRow } from '../types'
+import type { ContainerRow, ImageLayer, ImageRow, NetworkRow, VolumeRow } from '../types'
 
 // Invented sample data for the fake engine. Shapes follow the public Docker
 // Engine API; every name and value here is made up.
@@ -23,6 +23,7 @@ const label = (project: string, service: string) => ({
   'com.docker.compose.project': project,
   'com.docker.compose.service': service,
   'com.docker.compose.project.working_dir': `C:\\code\\${project}`,
+  'com.docker.compose.project.config_files': `C:\\code\\${project}\\compose.yaml`,
 })
 
 export const seedContainers: ContainerRow[] = [
@@ -90,6 +91,25 @@ export const seedVolumes: VolumeRow[] = [
   { name: 'cache-data', driver: 'local', createdAt: ago(60 * 24 * 30), size: 3.1 * MB, usedBy: [] },
   { name: 'old-scratch', driver: 'local', createdAt: ago(60 * 24 * 120), size: 61 * MB, usedBy: [] },
 ]
+
+const net = (id: string, name: string, rest: Partial<NetworkRow>): NetworkRow => ({
+  id, name, driver: 'bridge', scope: 'local', internal: false, ipv6: false, createdAt: ago(60 * 24 * 30), builtIn: false, usedBy: [], ...rest,
+})
+
+export const seedNetworks: NetworkRow[] = [
+  net('9c1e0a77b2d4f601', 'shop_default', { subnet: '172.18.0.0/16', gateway: '172.18.0.1', project: 'shop', createdAt: ago(60 * 24 * 14) }),
+  net('4b7d2e19c0a3f802', 'backend-internal', { internal: true, subnet: '172.30.0.0/24', gateway: '172.30.0.1', createdAt: ago(60 * 24 * 6) }),
+  net('7e3f9a0b1c2d4e03', 'analytics_default', { subnet: '172.19.0.0/16', gateway: '172.19.0.1', project: 'analytics', createdAt: ago(60 * 24 * 45) }),
+  net('2a8c6e4f0b1d3a04', 'bridge', { subnet: '172.17.0.0/16', gateway: '172.17.0.1', builtIn: true, createdAt: ago(60 * 24 * 90) }),
+  net('5d0f1b3e7a9c2b05', 'host', { driver: 'host', builtIn: true, createdAt: ago(60 * 24 * 90) }),
+  net('8f6a4c2e0d1b3c06', 'none', { driver: 'null', builtIn: true, createdAt: ago(60 * 24 * 90) }),
+]
+
+/** Containers on more than their default network (their project's, or bridge). */
+export const seedAttachments: Record<string, string[]> = {
+  b7c2e9f0a1b2c3d4: ['9c1e0a77b2d4f601', '4b7d2e19c0a3f802'], // shop-api-1
+  c9d8b7a6f5e4d3c2: ['9c1e0a77b2d4f601', '4b7d2e19c0a3f802'], // shop-db-1
+}
 
 export function seedLayers(image: ImageRow): ImageLayer[] {
   const base = image.tags[0]?.split(':')[0] ?? 'image'

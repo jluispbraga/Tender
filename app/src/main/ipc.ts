@@ -1,6 +1,6 @@
 import { ipcMain, shell, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { z } from 'zod'
-import { ApiError } from '../renderer/src/api/types'
+import { ApiError, type BuildSpec, type ComposeCommand, type LocalClusterTool } from '../renderer/src/api/types'
 import type { Store } from './db'
 import { toApiError, type Engine } from './engine/engine'
 import * as migrate from './migrate/migrate'
@@ -11,10 +11,16 @@ import * as resources from './tools/resources'
 import * as kube from './k8s/kube'
 import * as podTools from './k8s/pod-tools'
 import * as kubeMore from './k8s/resources'
+import * as helm from './k8s/helm'
+import * as localClusters from './k8s/local-clusters'
 import { settingValue } from './settings-schema'
 import * as updates from './updates'
 import type { PipeShare } from './tools/windows-tools'
 import { repairSocket } from './engine/wsl'
+import * as registries from './engine/registries'
+import * as build from './engine/build'
+import * as engines from './engine/engines'
+import * as composeFiles from './engine/compose-files'
 
 // The IPC surface from architecture.md ("API"). Three channels:
 //   tender:call   (route, args)         -> { ok, value } | { ok: false, error }
@@ -24,6 +30,19 @@ import { repairSocket } from './engine/wsl'
 
 const id = z.string().min(1).max(200)
 const ids = z.array(id).min(1).max(500)
+/** A reference that names a repository and optionally a tag: lower case, like Docker requires. */
+const imageRef = z
+  .string()
+  .max(255)
+  .regex(/^[a-z0-9]([a-z0-9._-]*[a-z0-9])?(:[0-9]+)?(\/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?$/, 'Use a name like ghcr.io/you/app:1.0: lower-case letters, digits, dots, dashes and slashes, then an optional :tag.')
+/** A path inside a container. */
+const containerPath = z.string().min(1).max(4096).startsWith('/', 'Paths inside a container start with /.')
+/** An absolute path to a Compose file; the main process checks it exists. */
+const filePath = z.string().min(3).max(1024).regex(/\.ya?ml$/i, 'That isn’t a Compose file.')
+const registryServer = z.string().min(1, 'Enter the registry address.').max(255).regex(/^(https?:\/\/)?[A-Za-z0-9.-]+(:[0-9]+)?\/?$/, 'Use an address like ghcr.io or myregistry.example:5000.')
+const octet = String.raw`(25[0-5]|2[0-4]\d|1?\d?\d)`
+const ip4 = new RegExp(String.raw`^${octet}(\.${octet}){3}$`)
+const cidr4 = new RegExp(String.raw`^${octet}(\.${octet}){3}/(3[0-2]|[12]?\d)$`)
 // Kubernetes context, namespace, pod and container names ('*': every namespace).
 const kubeName = z.string().min(1).max(253)
 const kubeKind = z.enum(['statefulsets', 'jobs', 'cronjobs', 'ingresses', 'configmaps', 'secrets'])
@@ -48,6 +67,12 @@ type Route = { args: z.ZodType; run: (args: any) => unknown }
 export function registerIpc(deps: IpcDeps) {
   const { engine, store } = deps
   const pulls = new Map<string, () => void>()
+  const pushes = new Map<string, () => void>()
+  const builds = new Map<string, () => void>()
+  const composeRuns = new Map<string, () => void>()
+  const scans = new Map<string, () => void>()
+  const clusterRuns = new Map<string, () => void>()
+  const composeCtx = async () => ({ docker: build.findDockerCli(), host: build.cliHost(engine.currentEndpoint), containers: await engine.rawContainers().catch(() => []) })
 
   const routes: Record<string, Route> = {
     'engine.status': { args: z.tuple([]), run: () => ({ ...engine.getStatus() }) },
@@ -100,6 +125,20 @@ export function registerIpc(deps: IpcDeps) {
     'kube.list': { args: z.tuple([kubeName, kubeName, kubeKind]), run: ([c, n, k]) => kubeMore.list(c, n, k) },
     'kube.yaml': { args: z.tuple([kubeName, z.enum(['pods', 'deployments', 'services', 'statefulsets', 'jobs', 'cronjobs', 'ingresses', 'configmaps', 'secrets']), kubeName, kubeName]), run: ([c, k, n, name]) => kubeMore.yaml(c, k, n, name) },
     'kube.events': { args: z.tuple([kubeName, kubeName]), run: ([c, n]) => kubeMore.events(c, n) },
+    'engine.options': { args: z.tuple([]), run: () => engines.options(engine.engineChoice) },
+    'engine.use': {
+      args: z.tuple([settingValue.engine_choice]),
+      run: async ([c]) => {
+        store.setSetting('engine_choice', c)
+        return engine.useEngine(c)
+      },
+    },
+    'kube.localClusters': { args: z.tuple([]), run: async () => ({ tools: localClusters.tools(), clusters: await localClusters.list(build.cliHost(engine.currentEndpoint)) }) },
+    'kube.cancelLocalCluster': { args: z.tuple([id]), run: ([r]) => void clusterRuns.get(r)?.() },
+    'kube.helmReleases': { args: z.tuple([kubeName, kubeName]), run: ([c, n]) => helm.releases(c, n) },
+    'kube.helmHistory': { args: z.tuple([kubeName, kubeName, kubeName]), run: ([c, n, name]) => helm.history(c, n, name) },
+    'kube.helmValues': { args: z.tuple([kubeName, kubeName, kubeName, z.number().int().min(1)]), run: ([c, n, name, r]) => helm.values(c, n, name, r) },
+    'kube.helmRollback': { args: z.tuple([kubeName, kubeName, kubeName, z.number().int().min(1)]), run: ([c, n, name, r]) => helm.rollback(c, n, name, r) },
     'kube.rollouts': { args: z.tuple([kubeName, kubeName, kubeName]), run: ([c, n, name]) => kubeMore.rollouts(c, n, name) },
     'kube.usage': { args: z.tuple([kubeName, kubeName]), run: ([c, n]) => kubeMore.podUsage(c, n) },
     'kube.data': { args: z.tuple([kubeName, kubeName, z.enum(['configmaps', 'secrets']), kubeName]), run: ([c, n, k, name]) => kubeMore.data(c, n, k, name) },
@@ -148,6 +187,99 @@ export function registerIpc(deps: IpcDeps) {
     'images.inspect': { args: z.tuple([id]), run: ([i]) => engine.inspectImage(i) },
     'images.diskUsage': { args: z.tuple([]), run: () => engine.diskUsage() },
     'images.cancelPull': { args: z.tuple([id]), run: ([p]) => void pulls.get(p)?.() },
+    'images.tag': { args: z.tuple([id, imageRef]), run: ([i, r]) => engine.tagImage(i, r) },
+    'images.openAdvisory': {
+      args: z.tuple([z.string().regex(/^[A-Za-z0-9._:-]{3,80}$/), z.string().max(500).optional()]),
+      run: ([vid, url]) => {
+        const ADVISORY_HOSTS = ['avd.aquasec.com', 'nvd.nist.gov', 'www.cve.org', 'cve.mitre.org', 'github.com', 'security-tracker.debian.org', 'ubuntu.com', 'access.redhat.com', 'security.alpinelinux.org', 'osv.dev', 'pkg.go.dev']
+        let target = `https://avd.aquasec.com/nvd/${encodeURIComponent(vid.toLowerCase())}`
+        try {
+          const u = url ? new URL(url) : null
+          if (u && u.protocol === 'https:' && ADVISORY_HOSTS.some((h) => u.hostname === h || u.hostname.endsWith(`.${h}`))) target = u.toString()
+        } catch {
+          // Not a URL: fall back to the advisory page for the ID.
+        }
+        return shell.openExternal(target)
+      },
+    },
+    'images.cancelScan': { args: z.tuple([id]), run: ([s]) => void scans.get(s)?.() },
+    'images.cancelPush': { args: z.tuple([id]), run: ([p]) => void pushes.get(p)?.() },
+    'composeFiles.list': {
+      args: z.tuple([]),
+      run: async () => {
+        const c = await composeCtx()
+        return composeFiles.list(c.docker, c.host, c.containers)
+      },
+    },
+    'composeFiles.get': {
+      args: z.tuple([filePath]),
+      run: async ([p]) => {
+        const c = await composeCtx()
+        return composeFiles.describe(c.docker, c.host, p, c.containers)
+      },
+    },
+    'composeFiles.add': {
+      args: z.tuple([]),
+      run: async () => {
+        const { dialog } = await import('electron')
+        const r = await dialog.showOpenDialog({ title: 'Open a Compose file', properties: ['openFile'], filters: [{ name: 'Compose files', extensions: ['yaml', 'yml'] }] })
+        const p = r.canceled ? undefined : r.filePaths[0]
+        if (!p) return null
+        composeFiles.addPath(p)
+        const c = await composeCtx()
+        return composeFiles.describe(c.docker, c.host, p, c.containers)
+      },
+    },
+    'composeFiles.forget': { args: z.tuple([filePath]), run: ([p]) => composeFiles.removePath(p) },
+    'composeFiles.cancel': { args: z.tuple([id]), run: ([r]) => void composeRuns.get(r)?.() },
+    'composeFiles.readEnv': { args: z.tuple([filePath]), run: ([p]) => composeFiles.readEnv(p) },
+    'composeFiles.writeEnv': { args: z.tuple([filePath, z.string().max(256 * 1024)]), run: ([p, t]) => composeFiles.writeEnv(p, t) },
+    'builds.pickContext': {
+      args: z.tuple([]),
+      run: async () => {
+        const { dialog } = await import('electron')
+        const r = await dialog.showOpenDialog({ title: 'Choose the folder to build', properties: ['openDirectory'] })
+        return r.canceled || !r.filePaths[0] ? null : build.inspectContext(r.filePaths[0])
+      },
+    },
+    'builds.cancel': { args: z.tuple([id]), run: ([b]) => void builds.get(b)?.() },
+    'tunnels.list': { args: z.tuple([]), run: () => engine.listTunnels() },
+    'tunnels.open': { args: z.tuple([id, z.number().int().min(1).max(65535)]), run: ([c, p]) => engine.openTunnel(c, p) },
+    'tunnels.close': { args: z.tuple([id]), run: ([t]) => engine.closeTunnel(t) },
+    'tunnels.visit': {
+      args: z.tuple([z.string().regex(/^https:\/\/[a-z0-9-]+\.trycloudflare\.com\/?$/, 'Only tunnel links open from here.')]),
+      run: ([u]) => shell.openExternal(u),
+    },
+    'files.list': { args: z.tuple([id, containerPath]), run: ([c, p]) => engine.listFiles(c, p) },
+    'files.download': {
+      args: z.tuple([id, containerPath, z.boolean()]),
+      run: async ([c, p, isDir]) => {
+        const { dialog } = await import('electron')
+        return engine.downloadFile(c, p, isDir, async (defaultPath, folder) => {
+          const r = await dialog.showSaveDialog({ title: folder ? 'Save the folder as a .tar' : 'Save the file', defaultPath, ...(folder ? { filters: [{ name: 'Tar archive', extensions: ['tar'] }] } : {}) })
+          return r.canceled || !r.filePath ? null : r.filePath
+        })
+      },
+    },
+    'files.upload': {
+      args: z.tuple([id, containerPath]),
+      run: async ([c, dir]) => {
+        const { dialog } = await import('electron')
+        const r = await dialog.showOpenDialog({ title: `Copy files into ${dir}`, properties: ['openFile', 'multiSelections'] })
+        if (r.canceled || !r.filePaths.length) return 0
+        return engine.uploadFiles(c, dir, r.filePaths)
+      },
+    },
+    'files.changes': { args: z.tuple([id]), run: ([c]) => engine.containerChanges(c) },
+    'registries.list': { args: z.tuple([]), run: () => registries.listLogins() },
+    'registries.login': {
+      args: z.tuple([registryServer, z.string().min(1, 'Enter the user name.').max(255), z.string().min(1, 'Enter the password or token.').max(4096)]),
+      run: async ([s, u, p]) => {
+        await engine.checkLogin(s, u, p)
+        return registries.saveLogin(s, u, p)
+      },
+    },
+    'registries.logout': { args: z.tuple([registryServer]), run: ([s]) => registries.removeLogin(s) },
     'images.remove': { args: z.tuple([ids, z.boolean().optional()]), run: ([i, f]) => engine.removeImages(i, f) },
     'images.prune': { args: z.tuple([z.enum(['dangling', 'unused'])]), run: ([s]) => engine.pruneImages(s) },
     'images.run': {
@@ -170,6 +302,46 @@ export function registerIpc(deps: IpcDeps) {
     },
     'volumes.remove': { args: z.tuple([ids]), run: ([n]) => engine.removeVolumes(n) },
     'volumes.usage': { args: z.tuple([id]), run: ([n]) => engine.volumeUsage(n) },
+    'volumes.exportTo': {
+      args: z.tuple([id]),
+      run: async ([n]) => {
+        const { dialog } = await import('electron')
+        const r = await dialog.showSaveDialog({ title: `Back up ${n}`, defaultPath: `${n}-${new Date().toISOString().slice(0, 10)}.tar.gz`, filters: [{ name: 'Gzipped tar', extensions: ['gz', 'tgz'] }] })
+        if (r.canceled || !r.filePath) return null
+        const bytes = await engine.exportVolume(n, r.filePath)
+        return { file: r.filePath, bytes }
+      },
+    },
+    'volumes.restoreFrom': {
+      args: z.tuple([z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]+$/, 'Use at least two characters: letters, digits, dots, dashes or underscores, starting with a letter or digit.').max(255)]),
+      run: async ([n]) => {
+        const { dialog } = await import('electron')
+        const r = await dialog.showOpenDialog({ title: `Restore ${n} from a backup`, properties: ['openFile'], filters: [{ name: 'Tar archives', extensions: ['gz', 'tgz', 'tar'] }] })
+        const file = r.canceled ? undefined : r.filePaths[0]
+        if (!file) return null
+        await engine.restoreVolume(n, file)
+        return { file }
+      },
+    },
+
+    'networks.list': { args: z.tuple([]), run: () => engine.listNetworks() },
+    'networks.create': {
+      args: z.tuple([
+        z
+          .object({
+            name: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]+$/, 'Use at least two characters: letters, digits, dots, dashes or underscores, starting with a letter or digit.').max(255),
+            internal: z.boolean(),
+            subnet: z.string().regex(cidr4, 'Write the subnet as an IPv4 range, like 172.30.0.0/24.').optional(),
+            gateway: z.string().regex(ip4, 'Write the gateway as an IPv4 address, like 172.30.0.1.').optional(),
+          })
+          .refine((s) => !s.gateway || s.subnet, { message: 'A gateway needs a subnet.', path: ['gateway'] }),
+      ]),
+      run: ([s]) => engine.createNetwork(s),
+    },
+    'networks.remove': { args: z.tuple([ids]), run: ([i]) => engine.removeNetworks(i) },
+    'networks.members': { args: z.tuple([id]), run: ([i]) => engine.networkMembers(i) },
+    'networks.connect': { args: z.tuple([id, id]), run: ([n, c]) => engine.connectNetwork(n, c) },
+    'networks.disconnect': { args: z.tuple([id, id]), run: ([n, c]) => engine.disconnectNetwork(n, c) },
 
     'settings.get': { args: z.tuple([]), run: () => store.settings() },
     'settings.set': {
@@ -231,6 +403,21 @@ export function registerIpc(deps: IpcDeps) {
     setupWsl: z.tuple([distro]),
     migrate: z.tuple([distro, z.array(z.string().max(300)).max(2000), z.object({ start: z.boolean() })]),
     pull: z.tuple([z.string().regex(/^[a-z0-9][a-z0-9._\/:@-]{0,255}$/i, 'That isn’t a valid image reference.')]),
+    push: z.tuple([imageRef]),
+    localCluster: z.tuple([z.enum(['kind', 'k3d', 'minikube']), z.enum(['create', 'remove']), z.string().regex(/^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/, 'Use lower-case letters, digits and dashes, up to 32 characters.')]),
+    scan: z.tuple([z.string().regex(/^[a-z0-9][a-z0-9._\/:@-]{0,255}$/i, 'That isn’t a valid image reference.')]),
+    compose: z.tuple([filePath, z.enum(['up', 'down', 'pull', 'build', 'restart', 'stop']), z.string().regex(/^[a-zA-Z0-9._-]+$/).max(128).nullable()]),
+    build: z.tuple([
+      z.object({
+        context: z.string().min(1).max(1024),
+        dockerfile: z.string().min(1).max(255).regex(/^[^/\\]+$/, 'Pick a Dockerfile in the folder itself.'),
+        tag: imageRef.optional(),
+        target: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/, 'A target is the name after AS in a FROM line.').max(128).optional(),
+        buildArgs: z.array(z.object({ key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, 'Build argument names use letters, digits and underscores.'), value: z.string().max(32_768) })).max(100),
+        noCache: z.boolean(),
+        pull: z.boolean(),
+      }),
+    ]),
   }
 
   ipcMain.handle('tender:sub', async (e, subId: unknown, kind: unknown, args: unknown) => {
@@ -293,6 +480,116 @@ export function registerIpc(deps: IpcDeps) {
             pulls.delete(subId)
             subs.delete(subId)
           })
+          break
+        }
+        case 'compose': {
+          const [path, cmd, service] = a as [string, ComposeCommand, string | null]
+          const docker = build.findDockerCli()
+          if (!docker) return { ok: false, error: { message: 'Compose files need the Docker CLI with Compose. Install it in Settings › General › Windows tools.', status: 424 } }
+          const r = composeFiles.command(docker, build.cliHost(engine.currentEndpoint), path, cmd, service ?? undefined, (lines) => to({ type: 'lines', lines }))
+          composeRuns.set(subId, r.cancel)
+          stop = r.cancel
+          r.done
+            .then(
+              () => to({ type: 'done' }),
+              (err) => {
+                const ae = toApiError(err)
+                to({ type: 'error', message: ae.message, status: ae.status })
+              },
+            )
+            .finally(() => {
+              composeRuns.delete(subId)
+              subs.delete(subId)
+            })
+          break
+        }
+        case 'build': {
+          const spec = a[0] as BuildSpec
+          const docker = build.findDockerCli()
+          if (!docker) return { ok: false, error: { message: 'Building needs the Docker CLI. Install it in Settings › General › Windows tools, or put docker on your PATH.', status: 424 } }
+          build.inspectContext(spec.context)
+          const b = build.build(docker, build.cliHost(engine.currentEndpoint), spec, (ev) => to(ev))
+          builds.set(subId, b.cancel)
+          stop = b.cancel
+          b.done
+            .then(
+              ({ imageId }) => {
+                notify({ kind: 'success', title: spec.tag ? `Built ${spec.tag}` : 'Build finished' })
+                to({ type: 'done', imageId })
+              },
+              (err) => {
+                const ae = toApiError(err)
+                if (ae.status !== 499) notify({ kind: 'error', title: spec.tag ? `Couldn’t build ${spec.tag}` : 'Build failed', body: ae.message })
+                to({ type: 'error', message: ae.message, status: ae.status })
+              },
+            )
+            .finally(() => {
+              builds.delete(subId)
+              subs.delete(subId)
+            })
+          break
+        }
+        case 'scan': {
+          const ref: string = a[0]
+          const sc = engine.scanImage(ref, (phase) => to({ type: 'phase', phase }))
+          scans.set(subId, sc.cancel)
+          stop = sc.cancel
+          sc.done
+            .then(
+              (result) => to({ type: 'done', result }),
+              (err) => {
+                const ae = toApiError(err)
+                to({ type: 'error', message: ae.message, status: ae.status })
+              },
+            )
+            .finally(() => {
+              scans.delete(subId)
+              subs.delete(subId)
+            })
+          break
+        }
+        case 'localCluster': {
+          const [tool, action, name] = a as [LocalClusterTool, 'create' | 'remove', string]
+          const r = localClusters.command(tool, action, name, build.cliHost(engine.currentEndpoint), (lines) => to({ type: 'lines', lines }))
+          clusterRuns.set(subId, r.cancel)
+          stop = r.cancel
+          r.done
+            .then(
+              () => {
+                notify({ kind: 'success', title: action === 'create' ? `Created the ${tool} cluster ${name}` : `Deleted the ${tool} cluster ${name}` })
+                to({ type: 'done' })
+              },
+              (err) => {
+                const ae = toApiError(err)
+                to({ type: 'error', message: ae.message, status: ae.status })
+              },
+            )
+            .finally(() => {
+              clusterRuns.delete(subId)
+              subs.delete(subId)
+            })
+          break
+        }
+        case 'push': {
+          const reference: string = a[0]
+          const p = engine.push(reference, (layers) => to({ type: 'progress', layers }))
+          pushes.set(subId, p.cancel)
+          stop = p.cancel
+          p.done
+            .then(
+              () => {
+                notify({ kind: 'success', title: `Pushed ${reference}` })
+                to({ type: 'done' })
+              },
+              (err) => {
+                const ae = toApiError(err)
+                to({ type: 'error', message: ae.message, status: ae.status })
+              },
+            )
+            .finally(() => {
+              pushes.delete(subId)
+              subs.delete(subId)
+            })
           break
         }
         case 'kubeLogs':

@@ -1,11 +1,44 @@
 import { expect, row, setEngine, test } from './fixtures'
 
 test.describe('F09 files in a container', () => {
-  test('F09-H1 the Files tab is disabled with a reason', async ({ page, open }) => {
-    await open('#/containers/b7c2e9f0a1b2c3d4/logs')
-    const tab = page.getByRole('tab', { name: 'Files' })
-    await expect(tab).toBeDisabled()
-    await expect(tab).toHaveAttribute('title', /later milestone/)
+  test('F09-H1 browse folders, then go back up with the path bar', async ({ page, open, scan }) => {
+    await open('#/containers/b7c2e9f0a1b2c3d4/files')
+    const root = page.getByRole('table', { name: 'Files in /' })
+    await expect(root).toContainText('.dockerenv')
+    await root.getByRole('button', { name: 'app', exact: true }).click()
+    const app = page.getByRole('table', { name: 'Files in /app' })
+    await expect(app).toContainText('server.js')
+    await app.getByRole('button', { name: 'src', exact: true }).click()
+    await expect(page.getByRole('table', { name: 'Files in /app/src' })).toContainText('routes.js')
+    await scan('S08 files')
+    await page.getByRole('navigation', { name: 'Folder path' }).getByRole('button', { name: 'app', exact: true }).click()
+    await expect(page.getByRole('table', { name: 'Files in /app' })).toBeVisible()
+    await page.getByLabel('Go to path').fill('/etc')
+    await page.getByLabel('Go to path').press('Enter')
+    await expect(page.getByRole('table', { name: 'Files in /etc' })).toContainText('hosts')
+  })
+
+  test('F09-H2 download a file, upload into /tmp, see it in the changes', async ({ page, open }) => {
+    await open('#/containers/b7c2e9f0a1b2c3d4/files')
+    await page.getByRole('table', { name: 'Files in /' }).getByRole('button', { name: 'app', exact: true }).click()
+    await page.getByRole('button', { name: 'Download server.js' }).click()
+    await expect(page.getByText('Saved server.js').first()).toBeVisible()
+    await page.getByLabel('Go to path').fill('/tmp')
+    await page.getByLabel('Go to path').press('Enter')
+    await expect(page.getByText('This folder is empty.')).toBeVisible()
+    await page.getByRole('button', { name: 'Upload here' }).click()
+    await expect(page.getByText('Copied 1 file into /tmp').first()).toBeVisible()
+    await expect(page.getByRole('table', { name: 'Files in /tmp' })).toContainText('notes.txt')
+    await page.getByRole('switch', { name: 'Show what changed' }).click()
+    const changes = page.getByRole('list', { name: 'Changes against the image' })
+    await expect(changes).toContainText('/tmp/notes.txt')
+    await expect(changes).toContainText('/usr/share/doc')
+  })
+
+  test('F09-E1 a read-only folder refuses the upload', async ({ page, open }) => {
+    await open('#/containers/b7c2e9f0a1b2c3d4/files')
+    await page.getByRole('button', { name: 'Upload here' }).click()
+    await expect(page.getByText('/ is read-only in this container.').first()).toBeVisible()
   })
 })
 

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { ColumnDef, RowSelectionState } from '@tanstack/react-table'
-import { Database, Info, Plus, Trash2 } from 'lucide-react'
+import { Database, Eraser, Info, Plus, Trash2 } from 'lucide-react'
 import { api, type VolumeRow } from '@/api'
 import { PageHeader } from '@/app/AppShell'
 import { Button } from '@/components/ui/button'
@@ -100,11 +100,17 @@ export function VolumesPage() {
   const selected = (volumes.data ?? []).filter((v) => sel[v.name])
   const inUse = pendingDelete?.filter((v) => v.usedBy.length) ?? []
   const total = volumes.data?.length ?? 0
+  const unused = (volumes.data ?? []).filter((v) => !v.usedBy.length)
 
   return (
     <>
       <PageHeader title="Volumes">
         <span className="text-sm text-muted">{volumes.data ? `${total} volumes · ${bytes(volumes.data.reduce((s, v) => s + v.size, 0))}` : ''}</span>
+        {unused.length > 0 && (
+          <Button icon={<Eraser />} onClick={() => setPendingDelete(unused)}>
+            Remove unused
+          </Button>
+        )}
         <Button variant="primary" icon={<Plus />} onClick={() => setCreate(true)}>
           Create
         </Button>

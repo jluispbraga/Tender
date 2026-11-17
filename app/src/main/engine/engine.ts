@@ -19,12 +19,22 @@ import {
   type Mount,
   type PortBinding,
   type RunSpec,
+  type ScanPhase,
   type StatsSample,
+  type NetworkMember,
+  type NetworkRow,
+  type NetworkSpec,
   type VolumeRow,
   type VolumeUsage,
 } from '../../renderer/src/api/types'
 import { dockerOptions, resolveEndpoint, WINDOWS_PIPE, type Endpoint } from './endpoint'
 import { findWslEngine, listDistros, pipeExists, repairSocket, restartWsl, WslBridge } from './wsl'
+import { authFor, engineAddress, registryOf } from './registries'
+import { scan } from './scan'
+import * as files from './files'
+import * as tunnels from './tunnels'
+import * as snapshots from './snapshots'
+import { AUTO, endpointFor } from './engines'
 
 // The WSL distribution whose engine answered last, so Tender can boot it after a restart.
 const wslMemo = () => join(app.getPath('userData'), 'wsl-engine')
@@ -79,6 +89,8 @@ function dedupePorts(ports: Docker.Port[]): PortBinding[] {
  */
 export class Engine {
   private docker: Docker | null = null
+  /** 'auto', or the engine chosen in Settings (wsl://…, context://…, an address). */
+  private choice = AUTO
   private endpoint: Endpoint = resolveEndpoint()
   private status: EngineStatus = { state: 'starting', endpoint: this.endpoint.address }
   private pingTimer: NodeJS.Timeout | undefined
@@ -87,6 +99,7 @@ export class Engine {
   private statusListeners = new Set<Listener<EngineStatus>>()
   private eventListeners = new Set<Listener<EngineEvent[]>>()
   private dieListeners = new Set<Listener<{ id: string; name: string; exitCode: number }>>()
+  private signalListeners = new Set<Listener<{ kind: 'oom' | 'die'; id: string; name: string; exitCode: number; expected: boolean }>>()
   /** Containers Tender itself is stopping: their exit is expected, not a notification. */
   private stopping = new Set<string>()
   private hostArch = 'amd64'
@@ -112,6 +125,28 @@ export class Engine {
   /** The WSL distribution Tender is talking to, when it bridges to one and the engine answers. */
   get wslDistro(): string | null {
     return this.endpoint.name.startsWith('wsl:') && this.status.state === 'running' ? this.endpoint.name.slice(4) : null
+  }
+
+  /** The engine's own container list, labels included, for code that reads Compose labels. */
+  async rawContainers(): Promise<Docker.ContainerInfo[]> {
+    return this.call((d) => d.listContainers({ all: true }))
+  }
+
+  /** Every container die and out-of-memory kill, for alerts. `expected`: Tender stopped it. */
+  onContainerSignal(fn: Listener<{ kind: 'oom' | 'die'; id: string; name: string; exitCode: number; expected: boolean }>) {
+    this.signalListeners.add(fn)
+    return () => void this.signalListeners.delete(fn)
+  }
+
+  /** Uses another engine: 'auto', wsl://Distro, context://name or an address. Reconnects unless told not to. */
+  async useEngine(choice: string, reconnect = true): Promise<EngineStatus> {
+    this.choice = choice || AUTO
+    this.endpoint = endpointFor(this.choice)
+    return reconnect ? this.reconnect() : this.status
+  }
+
+  get engineChoice() {
+    return this.choice
   }
 
   get currentEndpoint() {
@@ -163,6 +198,14 @@ export class Engine {
    * distribution and bridge to it. An explicit DOCKER_HOST is never second-guessed.
    */
   private async discoverWsl() {
+    // A distribution chosen in Settings: bridge to it, no searching.
+    if (process.platform === 'win32' && this.endpoint.address.startsWith('wsl://') && !this.endpoint.socketPath) {
+      this.bridge = await WslBridge.open(this.endpoint.address.slice('wsl://'.length))
+      this.endpoint = { ...this.endpoint, socketPath: this.bridge.pipe }
+      return
+    }
+    // Only Automatic falls back to WSL; an engine the person picked is never second-guessed.
+    if (this.choice !== AUTO) return
     if (process.platform !== 'win32' || this.endpoint.kind !== 'npipe' || this.endpoint.name === 'DOCKER_HOST' || this.endpoint.socketPath) return
     // Dev only: pretend the default pipe is missing, to exercise this path next to Docker Desktop.
     if (this.endpoint.address === WINDOWS_PIPE && !app.isPackaged && process.env.TENDER_DEFAULT_PIPE) this.endpoint = { ...this.endpoint, address: `npipe:////./pipe/${process.env.TENDER_DEFAULT_PIPE}` }
@@ -224,7 +267,7 @@ export class Engine {
     this.eventStream = null
     this.docker = null
     this.closeBridge()
-    this.endpoint = resolveEndpoint()
+    this.endpoint = endpointFor(this.choice)
     this.setStatus({ state: 'starting', endpoint: this.endpoint.address })
     await this.connect()
     return this.status
@@ -274,7 +317,7 @@ export class Engine {
       // The distribution went away: drop the bridge so the next try looks again from the start.
       if (this.bridge) {
         this.closeBridge()
-        this.endpoint = resolveEndpoint()
+        this.endpoint = endpointFor(this.choice)
       }
       // 2 s, 4 s, 8 s, then every 10 s while unreachable.
       this.schedulePing(Math.min(10_000, 1000 * 2 ** this.failures))
@@ -308,7 +351,7 @@ export class Engine {
     const docker = this.docker
     if (!docker) return
     try {
-      const stream = (await docker.getEvents({ filters: { type: ['container', 'image', 'volume'] } })) as unknown as Readable
+      const stream = (await docker.getEvents({ filters: { type: ['container', 'image', 'volume', 'network'] } })) as unknown as Readable
       this.eventStream = stream
       let buf = ''
       stream.on('data', (chunk: Buffer) => {
@@ -329,6 +372,10 @@ export class Engine {
               // 130/137/143: stopped on purpose (docker stop, compose down, Ctrl+C), not a crash.
               const expected = this.stopping.has(id) || code === 0 || code === 130 || code === 137 || code === 143
               if (!expected) this.dieListeners.forEach((fn) => fn({ id, name: ev.Actor?.Attributes?.name ?? id.slice(0, 12), exitCode: code }))
+              this.signalListeners.forEach((fn) => fn({ kind: 'die', id, name: ev.Actor?.Attributes?.name ?? id.slice(0, 12), exitCode: code, expected: this.stopping.has(id) }))
+            }
+            if (ev.Type === 'container' && ev.Action === 'oom') {
+              this.signalListeners.forEach((fn) => fn({ kind: 'oom', id, name: ev.Actor?.Attributes?.name ?? id.slice(0, 12), exitCode: 137, expected: false }))
             }
           } catch {
             // A partial or unknown line: skip it.
@@ -357,7 +404,8 @@ export class Engine {
 
   async listContainers(): Promise<ContainerRow[]> {
     return this.call(async (d) => {
-      const list = await d.listContainers({ all: true })
+      // Tunnel helpers are shown as tunnels, not as containers of their own.
+      const list = (await d.listContainers({ all: true })).filter((c) => c.Labels?.['io.github.tender.helper'] !== 'tunnel')
       const missing = list.filter((c) => this.detailCache.get(c.Id)?.key !== c.State)
       // Inspecting every container serially over the pipe takes seconds; answer
       // now and fill start times in behind, then tell the renderer to refetch.
@@ -830,7 +878,7 @@ export class Engine {
   /**
    * Pulls an image, reporting per-layer progress. Resolves when done, rejects
    * with the registry's message (not found, auth required) or when cancelled.
-   * Public images only: Tender doesn't read Docker's credential helpers.
+   * Uses the login saved in Settings › Registries for the image's registry, if any.
    */
   pull(reference: string, onProgress: (layers: LayerProgress[]) => void): { done: Promise<void>; cancel: () => void } {
     let stream: Readable | null = null
@@ -840,11 +888,12 @@ export class Engine {
       const d = this.api()
       const ref = /[:@]/.test(reference.split('/').pop() ?? '') ? reference : `${reference}:latest`
       try {
-        stream = (await d.pull(ref)) as unknown as Readable
+        const authconfig = authFor(registryOf(ref))
+        stream = (await d.pull(ref, authconfig ? { authconfig } : {})) as unknown as Readable
       } catch (e) {
         const err = toApiError(e)
         if (err.status === 404 || /not found|manifest unknown|repository does not exist/i.test(err.message)) throw new ApiError(`No image called ${ref} was found. Check the name and tag.`, 404)
-        if (/unauthorized|denied|authentication required/i.test(err.message)) throw new ApiError(`${ref} needs a login. Run docker login for its registry, then try again.`, 401)
+        if (/unauthorized|denied|authentication required/i.test(err.message)) throw new ApiError(`${ref} needs a login. Add one for ${registryOf(ref)} in Settings › Registries, then try again.`, 401)
         throw err
       }
       if (cancelled) {
@@ -860,7 +909,7 @@ export class Engine {
             const failed = err ?? output?.find((o) => o.error)
             if (failed) {
               const msg = toApiError(err ?? new Error((failed as { error?: string }).error)).message
-              return reject(/unauthorized|denied/i.test(msg) ? new ApiError(`${ref} needs a login. Run docker login for its registry, then try again.`, 401) : new ApiError(msg))
+              return reject(/unauthorized|denied/i.test(msg) ? new ApiError(`${ref} needs a login. Add one for ${registryOf(ref)} in Settings › Registries, then try again.`, 401) : new ApiError(msg))
             }
             onProgress([...layers.values()].map((l) => ({ ...l, status: 'done' })))
             resolve()
@@ -892,6 +941,134 @@ export class Engine {
         cancelled = true
         stream?.destroy()
       },
+    }
+  }
+
+  exportVolume(name: string, file: string) {
+    return this.call((d) => snapshots.exportVolume(d, name, file))
+  }
+
+  restoreVolume(name: string, file: string) {
+    return this.call((d) => snapshots.restoreVolume(d, name, file))
+  }
+
+  listTunnels() {
+    return this.call((d) => tunnels.list(d))
+  }
+
+  openTunnel(containerId: string, port: number) {
+    return this.call((d) => tunnels.open(d, containerId, port))
+  }
+
+  closeTunnel(id: string) {
+    return this.call((d) => tunnels.close(d, id))
+  }
+
+  /** On quit: a temporary link must not outlive the app that made it. */
+  async closeAllTunnels() {
+    if (this.docker) await tunnels.closeAll(this.docker)
+  }
+
+  listFiles(id: string, path: string) {
+    return this.call((d) => files.list(d, id, path))
+  }
+
+  downloadFile(id: string, path: string, isDir: boolean, choose: (name: string, folder: boolean) => Promise<string | null>) {
+    return this.call((d) => files.download(d, id, path, isDir, choose))
+  }
+
+  uploadFiles(id: string, dir: string, paths: string[]) {
+    return this.call((d) => files.upload(d, id, dir, paths))
+  }
+
+  containerChanges(id: string) {
+    return this.call((d) => files.changes(d, id))
+  }
+
+  scanImage(reference: string, onPhase: (p: ScanPhase) => void) {
+    return scan(this.api(), reference, onPhase)
+  }
+
+  async tagImage(id: string, reference: string): Promise<void> {
+    const { repo, tag } = splitRef(reference)
+    await this.call((d) => d.getImage(id).tag({ repo, tag }))
+  }
+
+  /** Pushes a tagged image. Progress is per layer, like a pull. */
+  push(reference: string, onProgress: (layers: LayerProgress[]) => void): { done: Promise<void>; cancel: () => void } {
+    let stream: Readable | null = null
+    let cancelled = false
+    const layers = new Map<string, LayerProgress>()
+    const { repo, tag } = splitRef(reference)
+    const registry = registryOf(repo)
+    const needsLogin = () =>
+      new ApiError(
+        authFor(registry)
+          ? `The registry refused the push. The login for ${registry} may not be allowed to write to ${repo}.`
+          : `Pushing to ${registry} needs a login. Add one in Settings › Registries, then try again.`,
+        401,
+      )
+    const denied = (m: string) => /unauthorized|denied|authentication required|insufficient_scope/i.test(m)
+    const done = (async () => {
+      const d = this.api()
+      const authconfig = authFor(registry) ?? { serveraddress: engineAddress(registry) }
+      try {
+        stream = (await d.getImage(repo).push({ tag, authconfig })) as unknown as Readable
+      } catch (e) {
+        const err = toApiError(e)
+        if (err.status === 404) throw new ApiError(`There is no image called ${repo}:${tag} on this machine. Tag it first.`, 404)
+        if (denied(err.message)) throw needsLogin()
+        throw err
+      }
+      if (cancelled) {
+        stream.destroy()
+        throw new ApiError('Push cancelled.', 499)
+      }
+      let last = 0
+      await new Promise<void>((resolve, reject) => {
+        d.modem.followProgress(
+          stream!,
+          (err: unknown, output: { error?: string }[]) => {
+            if (cancelled) return reject(new ApiError('Push cancelled.', 499))
+            const failed = err ?? output?.find((o) => o.error)
+            if (failed) {
+              const msg = toApiError(err ?? new Error((failed as { error?: string }).error)).message
+              return reject(denied(msg) ? needsLogin() : new ApiError(msg))
+            }
+            onProgress([...layers.values()].map((l) => ({ ...l, status: 'done' })))
+            resolve()
+          },
+          (ev: { id?: string; status?: string; progressDetail?: { current?: number; total?: number } }) => {
+            if (!ev.id || !ev.status || ev.id === tag) return
+            const prev = layers.get(ev.id) ?? { id: ev.id.slice(0, 12), status: 'waiting' as const }
+            const status: LayerProgress['status'] = /pushed|already exists|mounted from/i.test(ev.status) ? 'done' : /pushing/i.test(ev.status) ? 'downloading' : prev.status
+            layers.set(ev.id, { ...prev, status, current: ev.progressDetail?.current ?? prev.current, total: ev.progressDetail?.total ?? prev.total })
+            if (Date.now() - last > 150) {
+              last = Date.now()
+              onProgress([...layers.values()])
+            }
+          },
+        )
+      })
+    })()
+    return {
+      done,
+      cancel: () => {
+        cancelled = true
+        stream?.destroy()
+      },
+    }
+  }
+
+  /** Asks the registry whether a login works, before Tender keeps it. */
+  async checkLogin(server: string, username: string, password: string): Promise<void> {
+    try {
+      await this.call((d) => d.checkAuth({ username, password, serveraddress: engineAddress(server) }))
+    } catch (e) {
+      const err = toApiError(e)
+      if (err.status === 401 || /unauthorized|incorrect|denied/i.test(err.message)) throw new ApiError(`${server} didn’t accept that user name and password.`, 401)
+      if (/no such host|timeout|connection refused|dial tcp/i.test(err.message)) throw new ApiError(`The engine couldn’t reach ${server}. Check the address.`, 502)
+      throw err
     }
   }
 
@@ -1020,7 +1197,120 @@ export class Engine {
       }))
     })
   }
+  // ---- networks --------------------------------------------------------------------------------
+
+  async listNetworks(): Promise<NetworkRow[]> {
+    return this.call(async (d) => {
+      const [nets, containers] = await Promise.all([d.listNetworks(), d.listContainers({ all: true })])
+      return nets.map((n) => toNetworkRow(n, containers)).sort(byNetwork)
+    })
+  }
+
+  async createNetwork(spec: NetworkSpec): Promise<NetworkRow> {
+    return this.call(async (d) => {
+      const existing = await d.listNetworks({ filters: { name: [spec.name] } })
+      if (existing.some((n) => n.Name === spec.name)) throw new ApiError(`A network called ${spec.name} already exists.`, 409)
+      const created = await d.createNetwork({
+        Name: spec.name,
+        Driver: 'bridge',
+        Internal: spec.internal,
+        CheckDuplicate: true,
+        ...(spec.subnet ? { IPAM: { Driver: 'default', Config: [{ Subnet: spec.subnet, ...(spec.gateway ? { Gateway: spec.gateway } : {}) }] } } : {}),
+      })
+      const info = (await created.inspect()) as Docker.NetworkInspectInfo
+      return toNetworkRow(info, [])
+    })
+  }
+
+  async removeNetworks(ids: string[]): Promise<(ActionResult & { usedBy?: string[] })[]> {
+    const d = this.api()
+    const [nets, containers] = await this.call((x) => Promise.all([x.listNetworks(), x.listContainers({ all: true })]))
+    return Promise.all(
+      ids.map(async (id) => {
+        const n = nets.find((x) => x.Id === id)
+        if (!n) return { id, ok: true }
+        if (BUILT_IN_NETWORKS.has(n.Name)) return { id, ok: false, error: `${n.Name} is built into Docker and cannot be removed.` }
+        // Docker only refuses while a running container is attached; a stopped one would then fail to start.
+        const usedBy = attached(n.Id, containers)
+        if (usedBy.length) return { id, ok: false, usedBy, error: `In use by ${usedBy.join(', ')}.` }
+        try {
+          await d.getNetwork(id).remove()
+          return { id, ok: true }
+        } catch (e) {
+          const err = toApiError(e)
+          if (err.status === 404) return { id, ok: true }
+          return { id, ok: false, error: err.message }
+        }
+      }),
+    )
+  }
+
+  async networkMembers(id: string): Promise<NetworkMember[]> {
+    return this.call(async (d) => {
+      const containers = await d.listContainers({ all: true })
+      return containers.flatMap((c) => {
+        const e = Object.values(c.NetworkSettings?.Networks ?? {}).find((x) => x.NetworkID === id)
+        if (!e) return []
+        return [
+          {
+            containerId: c.Id,
+            containerName: (c.Names?.[0] ?? c.Id).replace(/^\//, ''),
+            image: c.Image,
+            state: c.State as ContainerState,
+            ipv4: e.IPAddress || undefined,
+            mac: e.MacAddress || undefined,
+            aliases: (e.Aliases ?? []).filter((a: string) => !c.Id.startsWith(a)),
+          },
+        ]
+      })
+    })
+  }
+
+  async connectNetwork(id: string, containerId: string): Promise<void> {
+    await this.call((d) => d.getNetwork(id).connect({ Container: containerId }))
+  }
+
+  async disconnectNetwork(id: string, containerId: string): Promise<void> {
+    await this.call((d) => d.getNetwork(id).disconnect({ Container: containerId }))
+  }
 }
+
+const BUILT_IN_NETWORKS = new Set(['bridge', 'host', 'none'])
+
+/** ghcr.io/me/app:1.2 → repo ghcr.io/me/app, tag 1.2. No tag means latest. A port is not a tag. */
+export function splitRef(reference: string): { repo: string; tag: string } {
+  const slash = reference.lastIndexOf('/')
+  const colon = reference.lastIndexOf(':')
+  return colon > slash ? { repo: reference.slice(0, colon), tag: reference.slice(colon + 1) } : { repo: reference, tag: 'latest' }
+}
+
+/** Container list entries carry their networks by id; a stopped container keeps them too. */
+function attached(networkId: string, containers: Docker.ContainerInfo[]): string[] {
+  return containers
+    .filter((c) => Object.values(c.NetworkSettings?.Networks ?? {}).some((e) => e.NetworkID === networkId))
+    .map((c) => (c.Names?.[0] ?? c.Id).replace(/^\//, ''))
+}
+
+function toNetworkRow(n: Docker.NetworkInspectInfo, containers: Docker.ContainerInfo[]): NetworkRow {
+  const ipam = n.IPAM?.Config?.find((c) => c.Subnet && !c.Subnet.includes(':')) ?? n.IPAM?.Config?.[0]
+  return {
+    id: n.Id,
+    name: n.Name,
+    driver: n.Driver,
+    scope: n.Scope,
+    internal: !!n.Internal,
+    ipv6: !!n.EnableIPv6,
+    subnet: ipam?.Subnet || undefined,
+    gateway: ipam?.Gateway || undefined,
+    createdAt: n.Created ?? new Date(0).toISOString(),
+    builtIn: BUILT_IN_NETWORKS.has(n.Name),
+    project: n.Labels?.['com.docker.compose.project'],
+    usedBy: attached(n.Id, containers),
+  }
+}
+
+/** Built-in networks last: people come here for their own. */
+const byNetwork = (a: NetworkRow, b: NetworkRow) => Number(a.builtIn) - Number(b.builtIn) || a.name.localeCompare(b.name)
 
 /** One stats JSON object → a sample. CPU % follows `docker stats`: 100% = one core. */
 function toSample(id: string, s: any): StatsSample | null {

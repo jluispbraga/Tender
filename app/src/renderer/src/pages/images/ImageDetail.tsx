@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Layers, Play } from 'lucide-react'
+import { ArrowLeft, Layers, Play, Tag as TagIcon, Upload } from 'lucide-react'
 import { api, type ImageDetail as Detail } from '@/api'
 import { PageHeader } from '@/app/AppShell'
 import { Button } from '@/components/ui/button'
@@ -12,11 +12,15 @@ import { ago, bytes, fullDate, imageName, shortId } from '@/lib/format'
 import { keys } from '@/lib/queries'
 import { href, navigate, navigateWithQuery } from '@/lib/router'
 import { RunDialog } from './RunDialog'
+import { PushDialog, TagDialog } from './TagPushDialogs'
+import { ScanSection } from './ScanSection'
 
 /** S12: what an image is made of. */
 export function ImageDetail({ id }: { id: string }) {
   const q = useQuery({ queryKey: keys.image(id), queryFn: () => api.images.inspect(id), retry: false })
   const [run, setRun] = useState(false)
+  const [tagging, setTagging] = useState(false)
+  const [pushing, setPushing] = useState<string | false>(false)
 
   if (q.isPending) return <p role="status" className="p-5 text-base text-muted">Loading image…</p>
   if (q.isError) {
@@ -51,6 +55,12 @@ export function ImageDetail({ id }: { id: string }) {
         {d.image.inUse && (
           <Button onClick={() => navigateWithQuery({ q: d.image.tags[0] ?? '' }, 'containers')}>Show containers</Button>
         )}
+        <Button icon={<TagIcon />} onClick={() => setTagging(true)}>
+          Tag
+        </Button>
+        <Button icon={<Upload />} onClick={() => setPushing(d.image.tags[0] ?? '')}>
+          Push
+        </Button>
         <Button variant="primary" icon={<Play />} onClick={() => setRun(true)}>
           Run
         </Button>
@@ -80,6 +90,8 @@ export function ImageDetail({ id }: { id: string }) {
           </Row>
           <Row label="Exposed ports">{d.exposedPorts.length ? <span className="font-mono text-xs">{d.exposedPorts.join(', ')}</span> : <span className="text-muted">none</span>}</Row>
         </dl>
+
+        <ScanSection image={d.image} />
 
         <section aria-labelledby="layers-h" className="mt-8 flex flex-col gap-2">
           <div className="flex items-center gap-2">
@@ -119,6 +131,8 @@ export function ImageDetail({ id }: { id: string }) {
         <p className="mt-8 max-w-2xl text-sm text-muted">Vulnerability scanning isn’t built in. A local scanner such as Trivy can be added later.</p>
       </div>
       <RunDialog image={run ? d.image : null} onClose={() => setRun(false)} />
+      <TagDialog image={d.image} open={tagging} onClose={() => setTagging(false)} />
+      <PushDialog image={d.image} open={pushing !== false} initial={pushing || undefined} onClose={() => setPushing(false)} />
     </>
   )
 }

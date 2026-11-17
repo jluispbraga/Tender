@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnDef, RowSelectionState, VisibilityState } from '@tanstack/react-table'
-import { Box, Download, Eraser, Info, Layers, Play, Trash2 } from 'lucide-react'
+import { Box, Download, Eraser, Hammer, Info, Layers, Play, Trash2 } from 'lucide-react'
 import { api, type ImageRow } from '@/api'
 import { PageHeader } from '@/app/AppShell'
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,7 @@ import { useToast } from '@/components/ui/toast'
 import { ago, bytes, fullDate, imageName, shortId } from '@/lib/format'
 import { keys, useImages } from '@/lib/queries'
 import { navigate, navigateWithQuery } from '@/lib/router'
+import { BuildDialog } from '@/pages/builds/BuildDialog'
 import { CleanupDialog } from './CleanupDialog'
 import { PullDialog } from './PullDialog'
 import { RunDialog } from './RunDialog'
@@ -42,6 +43,7 @@ export function ImagesPage() {
   const [runImage, setRunImage] = useState<ImageRow | null>(null)
   const [pull, setPull] = useState<{ open: boolean; ref: string }>({ open: false, ref: '' })
   const [cleanup, setCleanup] = useState(false)
+  const [build, setBuild] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<ImageRow[] | null>(null)
   const [busy, setBusy] = useState<Set<string>>(new Set())
 
@@ -120,6 +122,9 @@ export function ImagesPage() {
         </span>
         <Button icon={<Eraser />} onClick={() => setCleanup(true)}>
           Clean up
+        </Button>
+        <Button icon={<Hammer />} onClick={() => setBuild(true)}>
+          Build
         </Button>
         <Button variant="primary" icon={<Download />} onClick={() => setPull({ open: true, ref: '' })}>
           Pull
@@ -206,6 +211,7 @@ export function ImagesPage() {
       <RunDialog image={runImage} onClose={() => setRunImage(null)} />
       <PullDialog open={pull.open} initial={pull.ref} onClose={() => setPull({ open: false, ref: '' })} />
       <CleanupDialog open={cleanup} onClose={() => setCleanup(false)} images={images.data ?? []} />
+      <BuildDialog open={build} onClose={() => setBuild(false)} />
       <ConfirmDialog
         open={!!pendingDelete}
         onOpenChange={(o) => !o && setPendingDelete(null)}

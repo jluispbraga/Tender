@@ -130,6 +130,128 @@ export interface LayerProgress {
   total?: number
 }
 
+export interface Tunnel {
+  /** The helper container's ID. */
+  id: string
+  containerId: string
+  containerName: string
+  port: number
+  /** https://….trycloudflare.com, once Cloudflare has handed one out. */
+  url?: string
+  state: 'starting' | 'open' | 'stopped'
+  startedAt: string
+}
+
+export interface FileEntry {
+  name: string
+  type: 'dir' | 'file' | 'link' | 'other'
+  size: number
+  modifiedAt: string
+}
+
+export interface FileListing {
+  path: string
+  entries: FileEntry[]
+  /** The folder was too big to read in full. */
+  truncated: boolean
+  /** exec: asked the container · archive: read through the engine (no shell, or stopped). */
+  via: 'exec' | 'archive'
+}
+
+export interface ContainerChange {
+  path: string
+  kind: 'added' | 'changed' | 'deleted'
+}
+
+export type Severity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN'
+
+export interface Vulnerability {
+  id: string
+  pkg: string
+  installed: string
+  /** The first version without it; missing when there is no fix yet. */
+  fixed?: string
+  severity: Severity
+  title?: string
+  url?: string
+  /** Where Trivy found the package: the OS, or a lock file inside the image. */
+  target: string
+}
+
+export interface ScanResult {
+  image: string
+  scannedAt: string
+  scanner: string
+  vulnerabilities: Vulnerability[]
+  counts: Record<Severity, number>
+}
+
+/** scanner: getting Trivy the first time · database: updating its vulnerability list · scanning */
+export type ScanPhase = 'scanner' | 'database' | 'scanning'
+
+export interface ComposeService {
+  name: string
+  image?: string
+  /** Has a build: section, so Build applies. */
+  build: boolean
+  ports: string[]
+  state: 'running' | 'restarting' | 'paused' | 'exited' | 'missing'
+  containerIds: string[]
+}
+
+export interface ComposeFile {
+  path: string
+  /** Compose's project name for it ('' when the file can't be read). */
+  project: string
+  services: ComposeService[]
+  /** Added in Tender, not only found from a running project. */
+  saved: boolean
+  hasEnv: boolean
+  error?: string
+}
+
+export type ComposeCommand = 'up' | 'down' | 'pull' | 'build' | 'restart' | 'stop'
+
+export interface BuildContext {
+  /** The folder sent to the builder. */
+  path: string
+  /** Dockerfiles in its top level, Dockerfile first. */
+  dockerfiles: string[]
+}
+
+export interface BuildSpec {
+  context: string
+  /** Relative to the context folder. */
+  dockerfile: string
+  tag?: string
+  target?: string
+  buildArgs: { key: string; value: string }[]
+  noCache: boolean
+  /** Check the registry for newer base images. */
+  pull: boolean
+}
+
+export interface BuildStep {
+  id: string
+  name: string
+  status: 'running' | 'done' | 'cached' | 'error'
+  seconds?: number
+}
+
+export type BuildEvent = { type: 'steps'; steps: BuildStep[] } | { type: 'log'; lines: string[] }
+
+export interface BuildHandle {
+  buildId: string
+  done: Promise<{ imageId: string }>
+}
+
+export interface RegistryLogin {
+  /** docker.io, ghcr.io, myregistry.example:5000 … */
+  server: string
+  username: string
+  savedAt: string
+}
+
 export interface PullHandle {
   pullId: string
   done: Promise<void>
@@ -151,6 +273,42 @@ export interface VolumeRow {
   usedBy: string[]
 }
 
+export interface NetworkRow {
+  id: string
+  name: string
+  driver: string
+  scope: string
+  internal: boolean
+  ipv6: boolean
+  subnet?: string
+  gateway?: string
+  createdAt: string
+  /** bridge, host and none: Docker made them and they cannot be removed. */
+  builtIn: boolean
+  /** From the com.docker.compose.network / project labels. */
+  project?: string
+  /** Names of the containers attached, running or not. */
+  usedBy: string[]
+}
+
+export interface NetworkMember {
+  containerId: string
+  containerName: string
+  image: string
+  state: ContainerState
+  ipv4?: string
+  mac?: string
+  aliases: string[]
+}
+
+export interface NetworkSpec {
+  name: string
+  internal: boolean
+  /** CIDR, e.g. 172.30.0.0/24. Left out: Docker picks one. */
+  subnet?: string
+  gateway?: string
+}
+
 export interface VolumeUsage {
   containerId: string
   containerName: string
@@ -160,7 +318,7 @@ export interface VolumeUsage {
 }
 
 export interface EngineEvent {
-  type: 'container' | 'image' | 'volume'
+  type: 'container' | 'image' | 'volume' | 'network'
   action: string
   id: string
 }
@@ -186,6 +344,10 @@ export interface Settings {
   share_docker_pipe: boolean
   /** Look for new versions on GitHub and download them in the background. */
   check_updates: boolean
+  /** Which engine to use: 'auto', wsl://Distro, context://name, or an address like tcp://host:2375. */
+  engine_choice: string
+  /** Out-of-memory kills, restart loops and unused WSL disk space, as system notifications too. */
+  alerts: boolean
   /** Kubeconfig files and folders to read besides ~/.kube/config (or KUBECONFIG). */
   kube_sources: string[]
   /** The user's name and environment per context, by KubeContext.key. The kubeconfig is never edited. */
@@ -250,6 +412,10 @@ export interface TenderApi {
     restartWsl(): Promise<EngineStatus>
     onStatus(cb: (s: EngineStatus) => void): Unsub
     onEvents(cb: (events: EngineEvent[]) => void): Unsub
+    /** Engines Tender can use: automatic, WSL distributions, Docker contexts, a custom address. */
+    options(): Promise<EngineOption[]>
+    /** Saves the choice and connects to it. */
+    use(choice: string): Promise<EngineStatus>
   }
   containers: {
     list(): Promise<ContainerRow[]>
@@ -281,12 +447,74 @@ export interface TenderApi {
     remove(ids: string[], force?: boolean): Promise<ActionResult[]>
     prune(scope: 'dangling' | 'unused'): Promise<{ deleted: string[]; spaceReclaimed: number }>
     run(spec: RunSpec): Promise<{ containerId: string }>
+    /** Adds a name to an image, e.g. ghcr.io/me/app:1.2. */
+    tag(id: string, reference: string): Promise<void>
+    /** Uploads a tagged image to its registry, with the saved login for that registry if there is one. */
+    push(reference: string, onProgress: (layers: LayerProgress[]) => void): PullHandle
+    cancelPush(pushId: string): Promise<void>
+    /** Scans an image for known vulnerabilities with Trivy, in a container on the same engine. */
+    scan(reference: string, onPhase: (p: ScanPhase) => void): { scanId: string; done: Promise<ScanResult> }
+    cancelScan(scanId: string): Promise<void>
+    /** Opens a vulnerability's advisory in the browser: only https pages on known security sites. */
+    openAdvisory(id: string, url?: string): Promise<void>
+  }
+  composeFiles: {
+    list(): Promise<ComposeFile[]>
+    get(path: string): Promise<ComposeFile>
+    /** Opens the file picker and remembers the file. Null when the person cancels. */
+    add(): Promise<ComposeFile | null>
+    forget(path: string): Promise<void>
+    run(path: string, command: ComposeCommand, service: string | undefined, onLines: (lines: string[]) => void): { runId: string; done: Promise<void> }
+    cancel(runId: string): Promise<void>
+    readEnv(path: string): Promise<string>
+    writeEnv(path: string, text: string): Promise<void>
+  }
+  builds: {
+    /** Opens the folder picker. Null when the person cancels. */
+    pickContext(): Promise<BuildContext | null>
+    start(spec: BuildSpec, onEvent: (e: BuildEvent) => void): BuildHandle
+    cancel(buildId: string): Promise<void>
+  }
+  tunnels: {
+    list(): Promise<Tunnel[]>
+    /** Opens a temporary public https link to a port of a running container. */
+    open(containerId: string, port: number): Promise<Tunnel>
+    close(id: string): Promise<void>
+    /** Opens the link in the browser. */
+    visit(url: string): Promise<void>
+  }
+  files: {
+    list(containerId: string, path: string): Promise<FileListing>
+    /** Asks where to save, then saves a file as itself or a folder as a .tar. Null if cancelled. */
+    download(containerId: string, path: string, isDir: boolean): Promise<string | null>
+    /** Asks which files, then copies them into the folder. Returns how many, or 0 if cancelled. */
+    upload(containerId: string, dir: string): Promise<number>
+    /** What changed against the image: docker diff. */
+    changes(containerId: string): Promise<ContainerChange[]>
+  }
+  registries: {
+    list(): Promise<RegistryLogin[]>
+    /** Checks the login with the registry first; saves it only if it works. */
+    login(server: string, username: string, password: string): Promise<RegistryLogin>
+    logout(server: string): Promise<void>
   }
   volumes: {
     list(): Promise<VolumeRow[]>
     create(name: string): Promise<VolumeRow>
     remove(names: string[]): Promise<(ActionResult & { usedBy?: string[] })[]>
     usage(name: string): Promise<VolumeUsage[]>
+    /** Asks where to save, then writes the volume's files as a .tar.gz. Null if cancelled. */
+    exportTo(name: string): Promise<{ file: string; bytes: number } | null>
+    /** Asks for a .tar or .tar.gz, then copies it into the volume (created if missing). Null if cancelled. */
+    restoreFrom(name: string): Promise<{ file: string } | null>
+  }
+  networks: {
+    list(): Promise<NetworkRow[]>
+    create(spec: NetworkSpec): Promise<NetworkRow>
+    remove(ids: string[]): Promise<(ActionResult & { usedBy?: string[] })[]>
+    members(id: string): Promise<NetworkMember[]>
+    connect(id: string, containerId: string): Promise<void>
+    disconnect(id: string, containerId: string): Promise<void>
   }
   settings: {
     get(): Promise<Settings>
@@ -346,6 +574,18 @@ export interface TenderApi {
     data(context: string, namespace: string, kind: 'configmaps' | 'secrets', name: string): Promise<KubeData>
     /** Events of one namespace, or all ('*'), newest first. */
     events(context: string, namespace: string): Promise<KubeEvent[]>
+    /** Helm releases (newest revision of each), read from the cluster: no helm binary needed. */
+    helmReleases(context: string, namespace: string): Promise<HelmRelease[]>
+    helmHistory(context: string, namespace: string, name: string): Promise<HelmRevision[]>
+    /** The values set for a revision (credentials masked) and its notes. */
+    helmValues(context: string, namespace: string, name: string, revision: number): Promise<{ values: unknown; notes?: string }>
+    /** kind, k3d and minikube found on PATH, and their clusters. */
+    localClusters(): Promise<{ tools: LocalClusterTool[]; clusters: LocalCluster[] }>
+    /** Creates or deletes a local cluster, streaming the tool's output. */
+    localCluster(tool: LocalClusterTool, action: 'create' | 'remove', name: string, onLines: (lines: string[]) => void): { runId: string; done: Promise<void> }
+    cancelLocalCluster(runId: string): Promise<void>
+    /** helm rollback; needs helm on PATH. */
+    helmRollback(context: string, namespace: string, name: string, revision: number): Promise<string>
     /** A deployment's revisions, newest first. */
     rollouts(context: string, namespace: string, name: string): Promise<KubeRevision[]>
     /** CPU and memory per pod; null when the cluster has no metrics-server. */
@@ -509,6 +749,33 @@ export interface KubeData {
   type?: string
 }
 
+export type LocalClusterTool = 'kind' | 'k3d' | 'minikube'
+
+export interface LocalCluster {
+  tool: LocalClusterTool
+  name: string
+  /** The kubeconfig context the tool writes for it. */
+  context: string
+  running?: boolean
+}
+
+export interface HelmRevision {
+  revision: number
+  /** deployed, superseded, failed, pending-upgrade… as Helm writes it. */
+  status: string
+  /** chart name and version, like nginx-15.4.2 */
+  chart: string
+  appVersion?: string
+  updatedAt?: string
+  description?: string
+}
+
+export interface HelmRelease extends HelmRevision {
+  name: string
+  namespace: string
+  revisions: number
+}
+
 export interface KubeOverview {
   pods: { name: string; namespace: string; status: string; ready: string; restarts: number; node?: string; containers: string[]; /** Declared container ports, for forwarding. */ ports: number[]; createdAt?: string; /** What made it: a Job, ReplicaSet, StatefulSet... */ owner?: { kind: string; name: string } }[]
   deployments: { name: string; namespace: string; ready: string; replicas: number; upToDate: number; images: string[]; createdAt?: string }[]
@@ -563,6 +830,13 @@ export interface DoctorCheck {
 }
 
 // ---- Docker Engine inside WSL -----------------------------------------------------
+
+export interface EngineOption {
+  /** What goes in the engine_choice setting. */
+  choice: string
+  label: string
+  detail: string
+}
 
 export interface WslDistro {
   name: string

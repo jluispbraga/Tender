@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ArrowLeft, Box, Pause, Play, RotateCw, Square, Trash2 } from 'lucide-react'
+import { ArrowLeft, Box, Globe, Pause, Play, RotateCw, Square, Trash2 } from 'lucide-react'
 import { api, type ContainerRow, type LogLine } from '@/api'
 import { PageHeader } from '@/app/AppShell'
 import { Button } from '@/components/ui/button'
@@ -19,6 +19,8 @@ import { InspectTab } from './tabs/InspectTab'
 import { MountsTab } from './tabs/MountsTab'
 import { ExecTab } from './tabs/ExecTab'
 import { StatsTab } from './tabs/StatsTab'
+import { FilesTab } from './tabs/FilesTab'
+import { ShareDialog, useTunnels } from './ShareDialog'
 
 const MAX_LINES = 5000
 
@@ -27,6 +29,8 @@ export function ContainerDetail({ id, tab }: { id: string; tab: string }) {
   const containers = useContainers()
   const actions = useContainerActions()
   const c = containers.data?.find((x) => x.id === id)
+  const [sharing, setSharing] = useState(false)
+  const tunnels = useTunnels()
 
   if (containers.isError) return <ErrorState what="this container" error={containers.error} onRetry={() => void containers.refetch()} />
   if (containers.isPending) return <DetailSkeleton />
@@ -82,6 +86,9 @@ export function ContainerDetail({ id, tab }: { id: string; tab: string }) {
         )}
         <Button iconOnly aria-label="Pause" icon={<Pause />} disabled={c.state !== 'running' || busy} onClick={() => void actions.run([c.id], 'pause')} />
         <Button iconOnly aria-label="Restart" icon={<RotateCw />} disabled={busy} onClick={() => void actions.run([c.id], 'restart')} />
+        <Button icon={<Globe />} disabled={!live} onClick={() => setSharing(true)}>
+          {(tunnels.data ?? []).some((t) => t.containerId === c.id && t.state !== 'stopped') ? 'Shared' : 'Share'}
+        </Button>
         <Button iconOnly variant="danger" aria-label="Delete" icon={<Trash2 />} disabled={busy} onClick={() => actions.askDelete([c])} />
         <ActionsMenu label="More actions" entries={actions.menu(c, { inDetail: true }).filter((e) => e.kind !== 'separator' && !headerLabels.includes(e.label))} />
       </PageHeader>
@@ -119,11 +126,12 @@ export function ContainerDetail({ id, tab }: { id: string; tab: string }) {
           { value: 'inspect', label: 'Inspect', content: <InspectTab id={c.id} /> },
           { value: 'mounts', label: 'Mounts', content: <MountsTab c={c} /> },
           { value: 'exec', label: 'Terminal', content: <ExecTab c={c} /> },
-          { value: 'files', label: 'Files', disabled: true, disabledReason: 'Browsing files inside a container is planned for a later milestone', content: null },
+          { value: 'files', label: 'Files', content: <FilesTab c={c} /> },
           { value: 'stats', label: 'Stats', content: <StatsTab c={c} /> },
         ]}
       />
       {actions.confirm}
+      <ShareDialog c={c} open={sharing} onClose={() => setSharing(false)} />
     </>
   )
 }

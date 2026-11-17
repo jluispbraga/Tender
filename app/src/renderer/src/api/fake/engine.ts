@@ -19,13 +19,25 @@ import {
   type RecentItem,
   type Settings,
   type StatsSample,
+  type NetworkMember,
+  type RegistryLogin,
+  type BuildStep,
+  type ComposeFile,
+  type Severity,
+  type FileEntry,
+  type Tunnel,
+  type LocalCluster,
+  type LocalClusterTool,
+  type Vulnerability,
+  type ComposeService,
+  type NetworkRow,
   type VolumeRow,
   type WindowsTools,
   type WslSetupEvent,
   type WslResources,
   type UpdateStatus,
 } from '../types'
-import { bootLines, chatter, flavour, seedContainers, seedImages, seedLayers, seedVolumes } from './seed'
+import { bootLines, chatter, flavour, seedAttachments, seedContainers, seedImages, seedLayers, seedNetworks, seedVolumes } from './seed'
 import { createFakeShell } from './shell'
 
 // An in-memory stand-in for Docker Engine, so every screen can be built and
@@ -41,6 +53,82 @@ export function createFakeApi(): TenderApi {
   let containers: ContainerRow[] = structuredClone(seedContainers)
   let images: ImageRow[] = structuredClone(seedImages)
   let volumes: VolumeRow[] = structuredClone(seedVolumes)
+  let networks: NetworkRow[] = structuredClone(seedNetworks)
+  const attachments = new Map<string, string[]>(Object.entries(structuredClone(seedAttachments)))
+  const addresses = new Map<string, string>()
+  const logins = new Map<string, RegistryLogin>()
+  const uploaded = new Map<string, string[]>()
+  let localClusters: LocalCluster[] = [{ tool: 'kind', name: 'dev', context: 'kind-dev' }]
+  const helmRels = [
+    {
+      name: 'web',
+      namespace: 'shop',
+      history: [
+        { revision: 3, status: 'deployed', chart: 'nginx-15.4.2', appVersion: '1.27.2', updatedAt: new Date(Date.now() - 2 * 3600_000).toISOString(), description: 'Upgrade complete' },
+        { revision: 2, status: 'superseded', chart: 'nginx-15.4.1', appVersion: '1.27.1', updatedAt: new Date(Date.now() - 3 * 86400_000).toISOString(), description: 'Upgrade complete' },
+        { revision: 1, status: 'superseded', chart: 'nginx-15.4.0', appVersion: '1.27.0', updatedAt: new Date(Date.now() - 9 * 86400_000).toISOString(), description: 'Install complete' },
+      ],
+    },
+    {
+      name: 'cache',
+      namespace: 'shop',
+      history: [{ revision: 1, status: 'failed', chart: 'redis-19.6.0', appVersion: '7.2.5', updatedAt: new Date(Date.now() - 40 * 60_000).toISOString(), description: 'Release "cache" failed: timed out waiting for the condition' }],
+    },
+  ]
+  let tunnels: Tunnel[] = []
+  // Compose files the fake knows: what `docker compose config` would print for each.
+  type FakeService = { image?: string; build?: boolean; ports: string[]; command: string }
+  const composeDefs: Record<string, { project: string; services: Record<string, FakeService> }> = {
+    [String.raw`C:\code\shop\compose.yaml`]: {
+      project: 'shop',
+      services: {
+        web: { image: 'nginx:1.27', ports: ['8080:80'], command: 'nginx -g "daemon off;"' },
+        api: { build: true, ports: ['3000:3000'], command: 'node server.js' },
+        db: { image: 'postgres:17', ports: ['5432:5432'], command: 'docker-entrypoint.sh postgres' },
+        worker: { build: true, ports: [], command: 'node worker.js' },
+      },
+    },
+    [String.raw`C:\code\analytics\compose.yaml`]: {
+      project: 'analytics',
+      services: {
+        clickhouse: { image: 'clickhouse/clickhouse-server:24.8', ports: ['8123:8123'], command: '/entrypoint.sh' },
+        grafana: { image: 'grafana/grafana:11.2.0', ports: ['3001:3000'], command: '/run.sh' },
+      },
+    },
+  }
+  const savedCompose = new Set<string>([String.raw`C:\code\analytics\compose.yaml`])
+  const envFiles = new Map<string, string>([[String.raw`C:\code\shop\compose.yaml`, '# Read by compose.yaml\nPOSTGRES_PASSWORD=dev\nAPI_PORT=3000\n']])
+  function describeCompose(path: string): ComposeFile {
+    const def = composeDefs[path]
+    const base = { path, saved: savedCompose.has(path), hasEnv: envFiles.has(path) }
+    if (!def) return { ...base, project: '', services: [], error: 'The file isn’t there any more.' }
+    const services: ComposeService[] = Object.entries(def.services).map(([name, sv]) => {
+      const mine = containers.filter((c) => c.project === def.project && c.service === name)
+      const states = mine.map((c) => c.state)
+      return {
+        name,
+        image: sv.image,
+        build: !!sv.build,
+        ports: sv.ports,
+        state: !mine.length ? 'missing' : states.includes('running') ? 'running' : states.includes('restarting') ? 'restarting' : states.includes('paused') ? 'paused' : 'exited',
+        containerIds: mine.map((c) => c.id),
+      }
+    })
+    return { ...base, project: def.project, services: services.sort((a, b) => a.name.localeCompare(b.name)) }
+  }
+  const server = (x: string) => {
+    const h = x.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '').toLowerCase()
+    return !h || h === 'index.docker.io' || h === 'hub.docker.com' ? 'docker.io' : h
+  }
+  const registryOf = (ref: string) => {
+    const first = ref.split('/')[0]
+    return ref.includes('/') && (first.includes('.') || first.includes(':') || first === 'localhost') ? server(first) : 'docker.io'
+  }
+  const splitRef = (ref: string) => {
+    const slash = ref.lastIndexOf('/')
+    const colon = ref.lastIndexOf(':')
+    return colon > slash ? { repo: ref.slice(0, colon), tag: ref.slice(colon + 1) } : { repo: ref, tag: 'latest' }
+  }
   let engine: EngineStatus = {
     state: 'running',
     endpoint: '//./pipe/docker_engine',
@@ -60,6 +148,8 @@ export function createFakeApi(): TenderApi {
     tray_enabled: true,
     share_docker_pipe: true,
     check_updates: true,
+    engine_choice: 'auto',
+    alerts: true,
     kube_sources: [],
     kube_labels: {},
     kube_forwards: [],
@@ -177,6 +267,29 @@ export function createFakeApi(): TenderApi {
   const refreshUsage = () => {
     for (const i of images) i.inUse = containers.some((c) => c.imageId === i.id)
     for (const v of volumes) v.usedBy = containers.filter((c) => c.mounts.some((m) => m.type === 'volume' && m.source === v.name)).map((c) => c.name)
+    for (const n of networks) n.usedBy = containers.filter((c) => netsOf(c).includes(n.id)).map((c) => c.name)
+  }
+  /** Like Docker: a container joins its Compose project's network, or bridge, unless told otherwise. */
+  function netsOf(c: ContainerRow): string[] {
+    const own = attachments.get(c.id)
+    if (own) return own.filter((id) => networks.some((n) => n.id === id))
+    const def = networks.find((n) => n.name === (c.project ? `${c.project}_default` : 'bridge'))
+    return def ? [def.id] : []
+  }
+  /** Stable, unique addresses inside each network's subnet. */
+  function addressIn(n: NetworkRow, c: ContainerRow): string | undefined {
+    if (!n.subnet) return undefined
+    const key = `${n.id}:${c.id}`
+    if (!addresses.has(key)) {
+      const taken = [...addresses.keys()].filter((k) => k.startsWith(`${n.id}:`)).length
+      addresses.set(key, n.subnet.split('/')[0].replace(/\.0$/, `.${taken + 2}`))
+    }
+    return addresses.get(key)
+  }
+  const netById = (id: string) => {
+    const n = networks.find((x) => x.id === id || x.name === id)
+    if (!n) throw new ApiError(`No such network: ${id}`, 404)
+    return n
   }
   refreshUsage()
 
@@ -440,6 +553,62 @@ export function createFakeApi(): TenderApi {
         }
         return items[kind].filter((x) => (ns === '*' || x.namespace === ns) && !fakeKubeDeleted.has(x.name))
       },
+      async localClusters() {
+        await sleep(150)
+        return { tools: ['kind', 'k3d'] as LocalClusterTool[], clusters: structuredClone(localClusters) }
+      },
+      localCluster(tool, action, name, onLines) {
+        const runId = rid()
+        let cancelled = false
+        pulls.set(runId, { cancel: () => (cancelled = true) })
+        const done = (async () => {
+          try {
+            const steps =
+              action === 'create'
+                ? [`Creating cluster "${name}" ...`, ' • Ensuring node image (kindest/node:v1.31.0) 🖼', ' • Preparing nodes 📦', ' • Writing configuration 📜', ' • Starting control-plane 🕹️', ` Set kubectl context to "${tool}-${name}"`]
+                : [`Deleting cluster "${name}" ...`, `Deleted nodes: ["${name}-control-plane"]`]
+            for (const l of steps) {
+              await sleep(200)
+              if (cancelled) throw new ApiError('Stopped.', 499)
+              onLines([l])
+            }
+            if (action === 'create') {
+              if (localClusters.some((c) => c.tool === tool && c.name === name)) throw new ApiError(`node(s) already exist for a cluster with the name "${name}"`, 422)
+              localClusters.push({ tool, name, context: tool === 'minikube' ? name : `${tool}-${name}`, running: tool === 'kind' ? undefined : true })
+            } else localClusters = localClusters.filter((c) => !(c.tool === tool && c.name === name))
+          } finally {
+            pulls.delete(runId)
+          }
+        })()
+        return { runId, done }
+      },
+      async cancelLocalCluster(runId) {
+        pulls.get(runId)?.cancel()
+      },
+      async helmReleases(_c, ns) {
+        await sleep(120)
+        const all = helmRels.map((r) => ({ ...r.history[0], name: r.name, namespace: r.namespace, revisions: r.history.length }))
+        return ns === '*' ? all : all.filter((r) => r.namespace === ns)
+      },
+      async helmHistory(_c, ns, name) {
+        await sleep(100)
+        return structuredClone(helmRels.find((r) => r.namespace === ns && r.name === name)?.history ?? [])
+      },
+      async helmValues(_c, ns, name, rev) {
+        await sleep(100)
+        const r = helmRels.find((x) => x.namespace === ns && x.name === name)
+        if (!r?.history.some((h) => h.revision === rev)) throw new ApiError(`Revision ${rev} of ${name} isn’t there any more.`, 404)
+        return { values: { replicaCount: rev > 2 ? 3 : 2, image: { tag: rev > 2 ? '1.27.2' : '1.27.1' }, auth: { enabled: true, password: '••••' } }, notes: 'Get the URL with: kubectl get svc web-nginx' }
+      },
+      async helmRollback(_c, ns, name, rev) {
+        await sleep(600)
+        const r = helmRels.find((x) => x.namespace === ns && x.name === name)
+        const from = r?.history.find((h) => h.revision === rev)
+        if (!r || !from) throw new ApiError(`Revision ${rev} of ${name} isn’t there any more.`, 404)
+        for (const h of r.history) if (h.status === 'deployed') h.status = 'superseded'
+        r.history.unshift({ ...from, revision: r.history[0].revision + 1, status: 'deployed', updatedAt: now(), description: `Rollback to ${rev}` })
+        return `Rolled ${name} back to revision ${rev}.`
+      },
       async events(_c, ns) {
         await sleep(120)
         const ago = (m: number) => new Date(Date.now() - m * 60_000).toISOString()
@@ -629,6 +798,22 @@ export function createFakeApi(): TenderApi {
     },
     platform: /Windows/.test(navigator.userAgent) ? 'win32' : /Mac OS/.test(navigator.userAgent) ? 'darwin' : 'linux',
     engine: {
+      async options() {
+        await up()
+        return [
+          { choice: 'auto', label: 'Automatic', detail: 'Like the Docker CLI: now npipe:////./pipe/docker_engine, with WSL as a fallback on Windows' },
+          { choice: 'wsl://Ubuntu', label: 'WSL: Ubuntu', detail: 'Docker inside this distribution' },
+          { choice: 'context://staging', label: 'Context: staging', detail: 'ssh://deploy@staging.example.internal' },
+          ...(/^(tcp|ssh|unix|npipe):\/\//.test(settings.engine_choice) ? [{ choice: settings.engine_choice, label: 'Custom address', detail: settings.engine_choice }] : []),
+        ]
+      },
+      async use(choice) {
+        await up(300)
+        if (!/^(auto|wsl:\/\/[\w.-]+|context:\/\/[\w.-]+|(tcp|ssh|unix|npipe):\/\/.+)$/.test(choice)) throw new ApiError('Use an address like tcp://host:2375, ssh://user@host, unix:///path or npipe:////./pipe/name.', 400)
+        settings.engine_choice = choice
+        setEngine({ state: 'running', endpoint: choice === 'auto' ? '//./pipe/docker_engine' : choice })
+        return engine
+      },
       async status() {
         await sleep(80)
         return { ...engine, containersRunning: containers.filter((c) => c.state === 'running').length }
@@ -792,7 +977,7 @@ export function createFakeApi(): TenderApi {
             await up(300)
             if (!/^[a-z0-9]+([._\/-][a-z0-9]+)*(:[\w][\w.-]{0,127}|@sha256:[a-f0-9]{8,})$/.test(ref)) throw new ApiError(`“${reference}” isn’t a valid image reference.`, 400)
             if (/doesnotexist|ngnix|notfound/.test(ref)) throw new ApiError(`No image called ${ref} exists in the registry.`, 404)
-            if (ref.startsWith('private/')) throw new ApiError(`${ref} is private. Sign in to its registry with docker login, then pull again.`, 401)
+            if (ref.startsWith('private/') && !logins.has('docker.io')) throw new ApiError(`${ref} needs a login. Add one for docker.io in Settings › Registries, then try again.`, 401)
             const n = 3 + Math.floor(Math.random() * 3)
             const layers: LayerProgress[] = Array.from({ length: n }, () => ({ id: rid().slice(0, 12), status: 'waiting' as const, total: Math.round((5 + Math.random() * 40) * 1e6), current: 0 }))
             onProgress(structuredClone(layers))
@@ -828,6 +1013,104 @@ export function createFakeApi(): TenderApi {
       },
       async cancelPull(pullId) {
         pulls.get(pullId)?.cancel()
+      },
+      async tag(id, reference) {
+        await up(200)
+        const img = images.find((i) => i.id === id || i.tags.includes(id))
+        if (!img) throw new ApiError(`No such image: ${id}`, 404)
+        const { repo, tag } = splitRef(reference)
+        const full = `${repo}:${tag}`
+        for (const other of images) other.tags = other.tags.filter((t) => t !== full)
+        img.tags = [...img.tags, full]
+        img.dangling = false
+        emit({ type: 'image', action: 'tag', id: img.id })
+      },
+      push(reference, progress) {
+        const pushId = rid()
+        let cancelled = false
+        pulls.set(pushId, { cancel: () => (cancelled = true) })
+        const done = (async () => {
+          try {
+            await up(300)
+            const { repo, tag } = splitRef(reference)
+            const full = `${repo}:${tag}`
+            const img = images.find((i) => i.tags.includes(full))
+            if (!img) throw new ApiError(`There is no image called ${full} on this machine. Tag it first.`, 404)
+            const reg = registryOf(repo)
+            const login = logins.get(reg)
+            if (!login && reg !== 'localhost:5000') throw new ApiError(`Pushing to ${reg} needs a login. Add one in Settings › Registries, then try again.`, 401)
+            if (login && reg === 'docker.io' && !repo.startsWith(`${login.username}/`))
+              throw new ApiError(`The registry refused the push. The login for ${reg} may not be allowed to write to ${repo}.`, 401)
+            const layers: LayerProgress[] = seedLayers(img)
+              .filter((l) => l.size > 0)
+              .map((l, i) => ({ id: rid().slice(0, 12), status: i === 0 ? ('done' as const) : ('waiting' as const), total: l.size, current: i === 0 ? l.size : 0 }))
+            progress(structuredClone(layers))
+            while (layers.some((l) => l.status !== 'done')) {
+              await sleep(160)
+              if (cancelled) throw new ApiError('Push cancelled.', 499)
+              for (const l of layers) {
+                if (l.status === 'waiting') l.status = 'downloading'
+                else if (l.status === 'downloading') {
+                  l.current = Math.min(l.total!, (l.current ?? 0) + l.total! * 0.35)
+                  if (l.current >= l.total!) l.status = 'done'
+                }
+              }
+              progress(structuredClone(layers))
+            }
+            notify({ kind: 'success', title: `Pushed ${full}` })
+          } finally {
+            pulls.delete(pushId)
+          }
+        })()
+        return { pullId: pushId, done }
+      },
+      async cancelPush(pushId) {
+        pulls.get(pushId)?.cancel()
+      },
+      scan(reference, onPhase) {
+        const scanId = rid()
+        let cancelled = false
+        pulls.set(scanId, { cancel: () => (cancelled = true) })
+        const done = (async () => {
+          try {
+            await up(200)
+            const img = images.find((i) => i.tags.includes(reference) || i.id === reference)
+            if (!img) throw new ApiError(`No such image: ${reference}`, 404)
+            for (const phase of ['scanner', 'database', 'scanning'] as const) {
+              onPhase(phase)
+              await sleep(phase === 'scanning' ? 500 : 250)
+              if (cancelled) throw new ApiError('Scan cancelled.', 499)
+            }
+            // Made-up findings, so every screen state can be built; IDs follow the CVE format but mean nothing.
+            const clean = /busybox|alpine|distroless/.test(reference)
+            const v = (id: string, pkg: string, installed: string, severity: Severity, fixed?: string, target = 'debian 12.7 (os)'): Vulnerability => ({
+              id, pkg, installed, fixed, severity, target, title: `Example finding in ${pkg}`, url: `https://avd.aquasec.com/nvd/${id.toLowerCase()}`,
+            })
+            const vulnerabilities = clean
+              ? []
+              : [
+                  v('CVE-2099-0001', 'openssl', '3.0.14-1', 'CRITICAL', '3.0.15-1'),
+                  v('CVE-2099-0002', 'libexpat1', '2.5.0-1', 'HIGH', '2.5.0-1+deb12u1'),
+                  v('CVE-2099-0003', 'zlib1g', '1:1.2.13', 'HIGH'),
+                  v('CVE-2099-0004', 'curl', '7.88.1-10', 'MEDIUM', '7.88.1-10+deb12u8'),
+                  v('CVE-2099-0005', 'tar', '1.34', 'LOW'),
+                  v('CVE-2099-0006', 'braces', '3.0.2', 'HIGH', '3.0.3', 'app/package-lock.json'),
+                  v('CVE-2099-0007', 'perl-base', '5.36.0-7', 'UNKNOWN'),
+                ]
+            const order: Severity[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN']
+            const counts = Object.fromEntries(order.map((x) => [x, vulnerabilities.filter((y) => y.severity === x).length])) as Record<Severity, number>
+            return { image: reference, scannedAt: now(), scanner: 'aquasec/trivy:0.57.1', vulnerabilities, counts }
+          } finally {
+            pulls.delete(scanId)
+          }
+        })()
+        return { scanId, done }
+      },
+      async cancelScan(scanId) {
+        pulls.get(scanId)?.cancel()
+      },
+      async openAdvisory() {
+        // The browser build has nowhere to open it.
       },
       async remove(ids, force) {
         await up(300)
@@ -918,6 +1201,26 @@ export function createFakeApi(): TenderApi {
           return { id: name, ok: true }
         })
       },
+      async exportTo(name) {
+        await up(400)
+        const v = volumes.find((x) => x.name === name)
+        if (!v) throw new ApiError(`There is no volume called ${name}.`, 404)
+        return { file: `${String.raw`C:\Users\you\Documents`}\\${name}-${now().slice(0, 10)}.tar.gz`, bytes: Math.round(v.size * 0.35) }
+      },
+      async restoreFrom(name) {
+        await up(500)
+        refreshUsage()
+        const busy = containers.filter((c) => (c.state === 'running' || c.state === 'paused' || c.state === 'restarting') && c.mounts.some((m) => m.type === 'volume' && m.source === name))
+        if (busy.length) throw new ApiError(`${busy.map((c) => c.name).join(', ')} ${busy.length === 1 ? 'is' : 'are'} using ${name}. Stop ${busy.length === 1 ? 'it' : 'them'} first, then restore.`, 409)
+        let v = volumes.find((x) => x.name === name)
+        if (!v) {
+          v = { name, driver: 'local', createdAt: now(), size: 0, usedBy: [] }
+          volumes.unshift(v)
+          emit({ type: 'volume', action: 'create', id: name })
+        }
+        v.size += 48_000_000
+        return { file: `${String.raw`C:\Users\you\Documents`}\\${name}-backup.tar.gz` }
+      },
       async usage(name) {
         await up()
         return containers
@@ -929,6 +1232,405 @@ export function createFakeApi(): TenderApi {
             target: c.mounts.find((m) => m.source === name)!.destination,
             ports: c.ports.map((p) => (p.publicPort ? `${p.publicPort}:${p.privatePort}` : String(p.privatePort))).join(', '),
           }))
+      },
+    },
+
+    composeFiles: {
+      async list() {
+        await up()
+        const running = new Set(containers.map((c) => c.project).filter(Boolean))
+        const paths = Object.entries(composeDefs)
+          .filter(([path, d]) => savedCompose.has(path) || running.has(d.project))
+          .map(([path]) => path)
+        return paths.map(describeCompose)
+      },
+      async get(path) {
+        await up()
+        return describeCompose(path)
+      },
+      async add() {
+        await up(150)
+        const path = String.raw`C:\code\shop\compose.yaml`
+        savedCompose.add(path)
+        return describeCompose(path)
+      },
+      async forget(path) {
+        await up(100)
+        savedCompose.delete(path)
+      },
+      run(path, command, service, onLines) {
+        const runId = rid()
+        let cancelled = false
+        pulls.set(runId, { cancel: () => (cancelled = true) })
+        const done = (async () => {
+          try {
+            await up(200)
+            const def = composeDefs[path]
+            if (!def) throw new ApiError('The file isn’t there any more.', 404)
+            if (command === 'down' && service) throw new ApiError('Down takes the whole project. To remove one service, stop it.', 400)
+            const names = service ? [service] : Object.keys(def.services)
+            const say = async (...lines: string[]) => {
+              await sleep(140)
+              if (cancelled) throw new ApiError('Stopped.', 499)
+              onLines(lines)
+            }
+            const cname = (n: string) => `${def.project}-${n}-1`
+            for (const n of names) {
+              const sv = def.services[n]
+              if (!sv) throw new ApiError(`no such service: ${n}`, 422)
+              const existing = containers.filter((c) => c.project === def.project && c.service === n)
+              const imageRef = sv.image ?? `${def.project}-${n}:latest`
+              if (command === 'pull') {
+                if (!sv.image) await say(` ${n} Skipped - No image to be pulled`)
+                else {
+                  await say(` ${n} Pulling`)
+                  if (!images.some((i) => i.tags.includes(imageRef))) {
+                    images.unshift({ id: 'sha256:' + rid(), tags: [imageRef], size: 400_000_000, createdAt: now(), arch: 'amd64', emulated: false, inUse: false, dangling: false })
+                    emit({ type: 'image', action: 'pull', id: imageRef })
+                  }
+                  await say(` ${n} Pulled`)
+                }
+              } else if (command === 'build') {
+                if (!sv.build) await say(` ${n} Skipped - No build section`)
+                else {
+                  await say(`#1 [${n} internal] load build definition from Dockerfile`, `#5 [${n} 2/3] RUN npm ci`, `#5 DONE 1.4s`)
+                  if (!images.some((i) => i.tags.includes(imageRef))) images.unshift({ id: 'sha256:' + rid(), tags: [imageRef], size: 180_000_000, createdAt: now(), arch: 'amd64', emulated: false, inUse: false, dangling: false })
+                  emit({ type: 'image', action: 'build', id: imageRef })
+                  await say(` Service ${n}  Built`)
+                }
+              } else if (command === 'up') {
+                if (!existing.length) {
+                  if (!images.some((i) => i.tags.includes(imageRef))) {
+                    await say(` ${n} Pulling`)
+                    images.unshift({ id: 'sha256:' + rid(), tags: [imageRef], size: 300_000_000, createdAt: now(), arch: 'amd64', emulated: false, inUse: false, dangling: false })
+                    await say(` ${n} Pulled`)
+                  }
+                  const img = images.find((i) => i.tags.includes(imageRef))!
+                  const c: ContainerRow = {
+                    id: rid() + rid(),
+                    name: cname(n),
+                    image: imageRef,
+                    imageId: img.id,
+                    command: sv.command,
+                    state: 'running',
+                    createdAt: now(),
+                    startedAt: now(),
+                    ports: sv.ports.map((x) => {
+                      const [pub, priv] = x.split(':')
+                      return { privatePort: Number(priv), publicPort: Number(pub), hostIp: '0.0.0.0', protocol: 'tcp' as const }
+                    }),
+                    mounts: [],
+                    env: [],
+                    labels: { 'com.docker.compose.project': def.project, 'com.docker.compose.service': n, 'com.docker.compose.project.config_files': path },
+                    project: def.project,
+                    service: n,
+                  }
+                  containers.unshift(c)
+                  await say(` Container ${c.name}  Created`, ` Container ${c.name}  Starting`, ` Container ${c.name}  Started`)
+                  emit({ type: 'container', action: 'create', id: c.id }, { type: 'container', action: 'start', id: c.id })
+                } else {
+                  for (const c of existing) {
+                    if (c.state !== 'running') {
+                      c.state = 'running'
+                      c.startedAt = now()
+                      await say(` Container ${c.name}  Starting`, ` Container ${c.name}  Started`)
+                      emit({ type: 'container', action: 'start', id: c.id })
+                    } else await say(` Container ${c.name}  Running`)
+                  }
+                }
+              } else if (command === 'stop' || command === 'down') {
+                for (const c of existing) {
+                  if (c.state === 'running' || c.state === 'paused') {
+                    await say(` Container ${c.name}  Stopping`)
+                    c.state = 'exited'
+                    c.exitCode = 0
+                    await say(` Container ${c.name}  Stopped`)
+                    emit({ type: 'container', action: 'die', id: c.id })
+                  }
+                  if (command === 'down') {
+                    containers = containers.filter((x) => x !== c)
+                    await say(` Container ${c.name}  Removed`)
+                    emit({ type: 'container', action: 'destroy', id: c.id })
+                  }
+                }
+              } else if (command === 'restart') {
+                for (const c of existing) {
+                  await say(` Container ${c.name}  Restarting`)
+                  c.state = 'running'
+                  c.startedAt = now()
+                  await say(` Container ${c.name}  Started`)
+                  emit({ type: 'container', action: 'restart', id: c.id })
+                }
+                if (!existing.length) await say(` ${n} has no container yet. Use Up to create it.`)
+              }
+            }
+            if (command === 'down') await say(` Network ${def.project}_default  Removed`)
+            refreshUsage()
+          } finally {
+            pulls.delete(runId)
+          }
+        })()
+        return { runId, done }
+      },
+      async cancel(runId) {
+        pulls.get(runId)?.cancel()
+      },
+      async readEnv(path) {
+        await up()
+        return envFiles.get(path) ?? ''
+      },
+      async writeEnv(path, text) {
+        await up(150)
+        if (!composeDefs[path]) throw new ApiError('The compose file isn’t there any more.', 404)
+        envFiles.set(path, text)
+      },
+    },
+
+    builds: {
+      async pickContext() {
+        await up(150)
+        return { path: String.raw`C:\code\shop`, dockerfiles: ['Dockerfile', 'Dockerfile.dev', 'worker.Dockerfile'] }
+      },
+      start(spec, onEvent) {
+        const buildId = rid()
+        let cancelled = false
+        pulls.set(buildId, { cancel: () => (cancelled = true) })
+        const plan: [string, string[]][] = [
+          ['[internal] load build definition from ' + spec.dockerfile, ['transferring dockerfile: 412B done']],
+          ['[internal] load .dockerignore', ['transferring context: 2B done']],
+          ['[internal] load metadata for docker.io/library/node:22-alpine', []],
+          ['[1/5] FROM docker.io/library/node:22-alpine', ['resolve docker.io/library/node:22-alpine done']],
+          ['[2/5] WORKDIR /app', []],
+          ['[3/5] COPY package*.json ./', []],
+          ['[4/5] RUN npm ci --omit=dev', ['added 214 packages, and audited 215 packages in 6s', '41 packages are looking for funding', 'found 0 vulnerabilities']],
+          ['[5/5] COPY . .', []],
+          ['exporting to image', ['exporting layers 0.4s done', 'writing image sha256:' + rid() + rid() + ' done', ...(spec.tag ? [`naming to docker.io/${spec.tag} done`] : [])]],
+        ]
+        const failing = /fail/.test(spec.tag ?? '')
+        const done = (async () => {
+          try {
+            await up(200)
+            const steps: BuildStep[] = []
+            for (let i = 0; i < plan.length; i++) {
+              const [name, out] = plan[i]
+              const id = String(i + 1)
+              const step: BuildStep = { id, name, status: 'running' }
+              steps.push(step)
+              onEvent({ type: 'log', lines: [`#${id} ${name}`] })
+              onEvent({ type: 'steps', steps: structuredClone(steps) })
+              await sleep(name.startsWith('[4/5]') ? 700 : 160)
+              if (cancelled) throw new ApiError('Build cancelled.', 499)
+              const cached = !spec.noCache && /^\[(2|3)\/5\]/.test(name)
+              if (failing && name.startsWith('[4/5]')) {
+                step.status = 'error'
+                const msg = 'process "/bin/sh -c npm ci --omit=dev" did not complete successfully: exit code: 1'
+                onEvent({ type: 'log', lines: [`#${id} 2.113 npm ERR! missing script: build`, `#${id} ERROR: ${msg}`] })
+                onEvent({ type: 'steps', steps: structuredClone(steps) })
+                throw new ApiError(msg, 422)
+              }
+              step.status = cached ? 'cached' : 'done'
+              step.seconds = cached ? undefined : Math.round(Math.random() * 30) / 10
+              onEvent({ type: 'log', lines: [...out.map((o, n) => `#${id} ${(n * 0.21).toFixed(3)} ${o}`), cached ? `#${id} CACHED` : `#${id} DONE ${step.seconds}s`] })
+              onEvent({ type: 'steps', steps: structuredClone(steps) })
+            }
+            const imageId = 'sha256:' + rid()
+            const tag = spec.tag ? (/:[^/]+$/.test(spec.tag) ? spec.tag : `${spec.tag}:latest`) : undefined
+            for (const other of images) if (tag) other.tags = other.tags.filter((t) => t !== tag)
+            images.unshift({ id: imageId, tags: tag ? [tag] : [], size: 182_000_000, createdAt: now(), arch: 'amd64', emulated: false, inUse: false, dangling: !tag })
+            emit({ type: 'image', action: 'build', id: imageId })
+            notify({ kind: 'success', title: tag ? `Built ${tag}` : 'Build finished' })
+            return { imageId }
+          } finally {
+            pulls.delete(buildId)
+          }
+        })()
+        return { buildId, done }
+      },
+      async cancel(buildId) {
+        pulls.get(buildId)?.cancel()
+      },
+    },
+
+    tunnels: {
+      async list() {
+        await up()
+        tunnels = tunnels.filter((t) => containers.some((c) => c.id === t.containerId))
+        for (const t of tunnels) if (containers.find((c) => c.id === t.containerId)?.state !== 'running') t.state = 'stopped'
+        return structuredClone(tunnels)
+      },
+      async open(containerId, port) {
+        await up(300)
+        const c = byId(containerId)
+        if (c.state !== 'running') throw new ApiError(`${c.name} isn’t running. Start it, then share it.`, 409)
+        const same = tunnels.find((t) => t.containerId === c.id && t.port === port && t.state !== 'stopped')
+        if (same) return structuredClone(same)
+        await sleep(900)
+        const words = ['amber', 'river', 'quiet', 'falcon', 'meadow', 'copper', 'lantern', 'orbit']
+        const pick = () => words[Math.floor(Math.random() * words.length)]
+        const t: Tunnel = { id: rid() + rid(), containerId: c.id, containerName: c.name, port, url: `https://${pick()}-${pick()}-${pick()}-${rid().slice(0, 4)}.trycloudflare.com`, state: 'open', startedAt: now() }
+        tunnels.push(t)
+        return structuredClone(t)
+      },
+      async close(id) {
+        await up(200)
+        tunnels = tunnels.filter((t) => t.id !== id)
+      },
+      async visit() {
+        // The browser build has nowhere to open it.
+      },
+    },
+
+    files: {
+      async list(id, path) {
+        await up()
+        const c = byId(id)
+        const p = path.replace(/\/+$/, '') || '/'
+        const t = (name: string, type: FileEntry['type'], size = 0): FileEntry => ({ name, type, size, modifiedAt: c.createdAt })
+        const tree: Record<string, FileEntry[]> = {
+          '/': ['app', 'bin', 'etc', 'home', 'lib', 'proc', 'root', 'tmp', 'usr', 'var'].map((n) => t(n, 'dir')).concat([t('.dockerenv', 'file')]),
+          '/app': [t('node_modules', 'dir'), t('src', 'dir'), t('package.json', 'file', 812), t('server.js', 'file', 4210), t('.env.example', 'file', 96)],
+          '/app/src': [t('routes.js', 'file', 2380), t('db.js', 'file', 1120)],
+          '/etc': [t('hosts', 'file', 174), t('hostname', 'file', 13), t('os-release', 'file', 267), t('nginx', 'dir')],
+          '/tmp': [...(uploaded.get(c.id) ?? []).map((n) => t(n, 'file', 1024))],
+        }
+        const entries = tree[p]
+        if (!entries) {
+          if (/\.\w+$/.test(p)) throw new ApiError(`${p} isn’t a folder in this container.`, 404)
+          return { path: p, entries: [], truncated: false, via: c.state === 'running' ? 'exec' : 'archive' }
+        }
+        return { path: p, entries: structuredClone(entries).sort((a, b) => Number(b.type === 'dir') - Number(a.type === 'dir') || a.name.localeCompare(b.name)), truncated: false, via: c.state === 'running' ? 'exec' : 'archive' }
+      },
+      async download(id, path, isDir) {
+        await up(200)
+        byId(id)
+        const name = path.split('/').pop() ?? 'file'
+        return `${String.raw`C:\Users\you\Downloads`}\\${isDir ? `${name}.tar` : name}`
+      },
+      async upload(id, dir) {
+        await up(200)
+        const c = byId(id)
+        if (dir !== '/tmp') throw new ApiError(`${dir} is read-only in this container.`, 403)
+        uploaded.set(c.id, [...(uploaded.get(c.id) ?? []), 'notes.txt'])
+        return 1
+      },
+      async changes(id) {
+        await up()
+        const c = byId(id)
+        if (c.state === 'created') return []
+        return [
+          { path: '/app/node_modules/.cache', kind: 'added' },
+          { path: '/etc/hosts', kind: 'changed' },
+          { path: '/tmp/server.pid', kind: 'added' },
+          { path: '/usr/share/doc', kind: 'deleted' },
+          ...(uploaded.get(c.id) ?? []).map((n) => ({ path: `/tmp/${n}`, kind: 'added' as const })),
+        ]
+      },
+    },
+
+    registries: {
+      async list() {
+        await up()
+        return [...logins.values()]
+      },
+      async login(address, username, password) {
+        await up(500)
+        const key = server(address)
+        if (!/^[a-z0-9.-]+(:[0-9]+)?$/.test(key)) throw new ApiError('Use an address like ghcr.io or myregistry.example:5000.', 400)
+        if (password === 'wrong') throw new ApiError(`${key} didn’t accept that user name and password.`, 401)
+        if (key.endsWith('.invalid')) throw new ApiError(`The engine couldn’t reach ${key}. Check the address.`, 502)
+        const l = { server: key, username, savedAt: now() }
+        logins.set(key, l)
+        return l
+      },
+      async logout(address) {
+        await up(150)
+        logins.delete(server(address))
+      },
+    },
+
+    networks: {
+      async list() {
+        await up()
+        refreshUsage()
+        return structuredClone(networks)
+      },
+      async create(spec) {
+        await up(250)
+        if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]+$/.test(spec.name)) throw new ApiError('Use at least two characters: letters, digits, dots, dashes or underscores, starting with a letter or digit.', 400)
+        if (networks.some((n) => n.name === spec.name)) throw new ApiError(`A network called ${spec.name} already exists.`, 409)
+        if (spec.gateway && !spec.subnet) throw new ApiError('A gateway needs a subnet.', 400)
+        const clash = spec.subnet ? networks.find((n) => n.subnet === spec.subnet) : undefined
+        if (clash) throw new ApiError(`${spec.subnet} overlaps ${clash.name}, which already uses it. Pick another range.`, 403)
+        const subnet = spec.subnet ?? `172.${20 + networks.length}.0.0/16`
+        const n: NetworkRow = {
+          id: rid() + rid(),
+          name: spec.name,
+          driver: 'bridge',
+          scope: 'local',
+          internal: spec.internal,
+          ipv6: false,
+          subnet,
+          gateway: spec.gateway ?? subnet.replace(/\.0\/\d+$/, '.1'),
+          createdAt: now(),
+          builtIn: false,
+          usedBy: [],
+        }
+        networks.unshift(n)
+        emit({ type: 'network', action: 'create', id: n.id })
+        return structuredClone(n)
+      },
+      async remove(ids) {
+        await up(300)
+        refreshUsage()
+        return ids.map((id) => {
+          const n = networks.find((x) => x.id === id)
+          if (!n) return { id, ok: true }
+          if (n.builtIn) return { id, ok: false, error: `${n.name} is built into Docker and cannot be removed.` }
+          if (n.usedBy.length) return { id, ok: false, usedBy: n.usedBy, error: `In use by ${n.usedBy.join(', ')}.` }
+          networks = networks.filter((x) => x !== n)
+          emit({ type: 'network', action: 'destroy', id })
+          return { id, ok: true }
+        })
+      },
+      async members(id) {
+        await up()
+        const n = netById(id)
+        return containers
+          .filter((c) => netsOf(c).includes(n.id))
+          .map((c): NetworkMember => {
+            const live = c.state === 'running' || c.state === 'paused'
+            return {
+              containerId: c.id,
+              containerName: c.name,
+              image: c.image,
+              state: c.state,
+              ipv4: live ? addressIn(n, c) : undefined,
+              mac: live && n.subnet ? `02:42:${c.id.slice(0, 8).match(/../g)!.join(':')}` : undefined,
+              aliases: c.service ? [c.service, c.name] : [],
+            }
+          })
+      },
+      async connect(id, containerId) {
+        await up(250)
+        const n = netById(id)
+        const c = byId(containerId)
+        if (n.driver === 'host' || n.driver === 'null') throw new ApiError(`A container is put on ${n.name} when it is created; it can’t join later.`, 400)
+        const current = netsOf(c)
+        if (current.includes(n.id)) throw new ApiError(`${c.name} is already on ${n.name}.`, 403)
+        attachments.set(c.id, [...current, n.id])
+        refreshUsage()
+        emit({ type: 'network', action: 'connect', id: n.id })
+      },
+      async disconnect(id, containerId) {
+        await up(250)
+        const n = netById(id)
+        const c = byId(containerId)
+        const current = netsOf(c)
+        if (!current.includes(n.id)) throw new ApiError(`${c.name} isn’t on ${n.name}.`, 404)
+        attachments.set(c.id, current.filter((x) => x !== n.id))
+        addresses.delete(`${n.id}:${c.id}`)
+        refreshUsage()
+        emit({ type: 'network', action: 'disconnect', id: n.id })
       },
     },
 

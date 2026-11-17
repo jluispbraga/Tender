@@ -1,15 +1,21 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Command } from 'cmdk'
 import * as RDialog from '@radix-ui/react-dialog'
 import { Search } from 'lucide-react'
 
 export interface PaletteGroup {
   heading: string
+  /** Shown only once something is typed: long lists of actions would bury the search results. */
+  searchOnly?: boolean
   items: { id: string; label: string; hint?: string; icon?: ReactNode; onSelect: () => void }[]
 }
 
 /** Quick search (S19), Ctrl+K. Combobox semantics from cmdk; focus trap from Radix Dialog. */
 export function CommandPalette({ open, onOpenChange, groups }: { open: boolean; onOpenChange: (o: boolean) => void; groups: PaletteGroup[] }) {
+  const [q, setQ] = useState('')
+  useEffect(() => {
+    if (open) setQ('')
+  }, [open])
   return (
     <RDialog.Root open={open} onOpenChange={onOpenChange}>
       <RDialog.Portal>
@@ -19,12 +25,12 @@ export function CommandPalette({ open, onOpenChange, groups }: { open: boolean; 
           <Command label="Quick search" className="flex flex-col">
             <div className="flex items-center gap-2 border-b border-line px-3">
               <Search aria-hidden className="size-4 text-muted" />
-              <Command.Input placeholder="Find a container, image or volume" className="h-11 flex-1 bg-transparent text-base text-fg outline-none placeholder:text-muted" />
+              <Command.Input value={q} onValueChange={setQ} placeholder="Find a container, image, volume or action" className="h-11 flex-1 bg-transparent text-base text-fg outline-none placeholder:text-muted" />
               <kbd className="rounded-sm border border-line px-1.5 text-xs text-muted">Esc</kbd>
             </div>
             <Command.List className="max-h-80 overflow-auto p-1">
               <Command.Empty className="px-3 py-6 text-center text-sm text-muted">Nothing matches that.</Command.Empty>
-              {groups.map((g) => (
+              {groups.filter((g) => !g.searchOnly || q.trim()).map((g) => (
                 <Command.Group key={g.heading} heading={g.heading} className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted">
                   {g.items.map((i) => (
                     <Command.Item
