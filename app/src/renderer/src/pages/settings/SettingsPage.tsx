@@ -12,6 +12,7 @@ import { WindowsTools } from './WindowsTools'
 import { Updates } from './Updates'
 import { KubeSources } from './KubeSources'
 import { Registries } from './Registries'
+import { EnginePicker } from './EnginePicker'
 
 const sections = [
   { key: 'general', label: 'General' },
@@ -172,9 +173,9 @@ function EngineSection() {
           <dd>{e?.ncpu ? `${e.ncpu} CPUs · ${((e.memTotal ?? 0) / 1e9).toFixed(1)} GB` : '—'}</dd>
         </dl>
       </Group>
-      <p className="text-sm text-muted">
-        Tender uses an engine you already run. Connecting to other engines and editing the engine’s configuration file are planned for a later milestone.
-      </p>
+      <Group title="Which engine">
+        <EnginePicker />
+      </Group>
     </div>
   )
 }

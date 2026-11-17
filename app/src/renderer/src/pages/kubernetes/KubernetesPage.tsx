@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Braces, Cable, Eye, FileText, History, Info, Loader2, Pencil, RefreshCw, RotateCw, Scale, Ship, SquareTerminal, Trash2 } from 'lucide-react'
+import { Boxes, Braces, Cable, Eye, FileText, History, Info, Loader2, Pencil, RefreshCw, RotateCw, Scale, Ship, SquareTerminal, Trash2 } from 'lucide-react'
 import { api, type KubeAction, type KubeItem, type KubeKind, type KubeOverview } from '@/api'
 import { PageHeader } from '@/app/AppShell'
 import { Button } from '@/components/ui/button'
@@ -19,16 +19,19 @@ import { ForwardDialog, ForwardsBar, type ForwardTarget } from './Forwards'
 import { deploymentProblem, podProblem } from './health'
 import { DataDialog, MoreKinds, NoStatus, kindLabel, type ChangeRequest, type DeleteRequest, type ScaleRequest } from './MoreKinds'
 import { EventsTab } from './EventsTab'
+import { HelmTab } from './HelmTab'
+import { Tooltip } from '@/components/ui/tooltip'
+import { LocalClustersDialog } from './LocalClusters'
 import { PodPanel, WorkloadPanel, type PodTab } from './PodPanel'
 import { RolloutDialog } from './RolloutDialog'
 import { Table } from './Table'
 import { YamlDialog, type YamlTarget } from './YamlDialog'
 
 type Pod = KubeOverview['pods'][number]
-type Tab = 'pods' | 'deployments' | 'services' | KubeKind | 'events'
-const tabs: Tab[] = ['pods', 'deployments', 'services', 'statefulsets', 'jobs', 'cronjobs', 'ingresses', 'configmaps', 'secrets', 'events']
-const tabLabel = (t: Tab) => (t === 'pods' ? 'Pods' : t === 'deployments' ? 'Deployments' : t === 'services' ? 'Services' : t === 'events' ? 'Events' : kindLabel[t])
-const isMore = (t: Tab): t is KubeKind => !['pods', 'deployments', 'services', 'events'].includes(t)
+type Tab = 'pods' | 'deployments' | 'services' | KubeKind | 'helm' | 'events'
+const tabs: Tab[] = ['pods', 'deployments', 'services', 'statefulsets', 'jobs', 'cronjobs', 'ingresses', 'configmaps', 'secrets', 'helm', 'events']
+const tabLabel = (t: Tab) => (t === 'pods' ? 'Pods' : t === 'deployments' ? 'Deployments' : t === 'services' ? 'Services' : t === 'events' ? 'Events' : t === 'helm' ? 'Helm' : kindLabel[t])
+const isMore = (t: Tab): t is KubeKind => !['pods', 'deployments', 'services', 'helm', 'events'].includes(t)
 const mib = (b: number) => (b >= 1024 * 2 ** 20 ? `${(b / 2 ** 30).toFixed(1)} GiB` : `${Math.round(b / 2 ** 20)} MiB`)
 type Group = { kind: 'deployment' | 'statefulset'; namespace: string; name: string }
 
@@ -62,6 +65,7 @@ export function KubernetesPage() {
   const here = clusterLabel(current, labels)
   const prod = here.env === 'prod'
   const [naming, setNaming] = useState(false)
+  const [locals, setLocals] = useState(false)
   const [pendingChange, setPendingChange] = useState<ChangeRequest | null>(null)
 
   const namespaces = useQuery({ queryKey: ['kube', 'ns', context], queryFn: () => api.kube.namespaces(context!), enabled: !!context, retry: false })
@@ -86,6 +90,9 @@ export function KubernetesPage() {
     return (
       <>
         <PageHeader title="Kubernetes">
+          <Button icon={<Boxes />} onClick={() => setLocals(true)}>
+            Local clusters
+          </Button>
           <a href={href('settings', 'general')} className="text-sm text-accent hover:underline">
             Kubeconfig files
           </a>
@@ -93,6 +100,7 @@ export function KubernetesPage() {
             Refresh
           </Button>
         </PageHeader>
+        {locals && <LocalClustersDialog onClose={() => setLocals(false)} />}
         {p ? (
           <div className="p-6">
             <section aria-labelledby="kube-problem" className="flex max-w-2xl flex-col gap-3 rounded-lg border border-line p-4">
@@ -156,6 +164,9 @@ export function KubernetesPage() {
         <div className="w-44">
           <Select label="Namespace" value={ns} onValueChange={(v) => (setNs(v), setPanel(null))} options={[{ value: '*', label: 'All namespaces' }, ...(namespaces.data ?? []).map((n) => ({ value: n, label: n }))]} />
         </div>
+        <Tooltip content="Local clusters (kind, k3d, minikube)">
+          <Button iconOnly aria-label="Local clusters" icon={<Boxes />} onClick={() => setLocals(true)} />
+        </Tooltip>
         <a href={href('settings', 'general')} className="text-sm text-accent hover:underline">
           Kubeconfig files
         </a>
@@ -163,6 +174,7 @@ export function KubernetesPage() {
           Refresh
         </Button>
       </PageHeader>
+      {locals && <LocalClustersDialog onClose={() => setLocals(false)} />}
       <div className="flex min-h-0 flex-1 flex-col">
         <p className={cn('shrink-0 border-b px-5 py-2 text-sm', prod ? 'border-danger bg-danger-bg text-danger' : 'border-line text-muted')}>
           {prod ? 'Production cluster: restart, scale and delete change ' : 'Restart, scale and delete act on '}
@@ -299,6 +311,7 @@ export function KubernetesPage() {
                 />
               )}
             </div>
+            {tab === 'helm' && context && <HelmTab context={context} namespace={ns} filter={q} problemsOnly={problemsOnly} clusterName={here.label} prod={prod} />}
             {tab === 'events' && context && <EventsTab context={context} namespace={ns} filter={q} problemsOnly={problemsOnly} onOpenPod={openPod} />}
             {group && context && (
               <WorkloadPanel

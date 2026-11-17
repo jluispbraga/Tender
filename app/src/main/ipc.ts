@@ -1,6 +1,6 @@
 import { ipcMain, shell, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { z } from 'zod'
-import { ApiError, type BuildSpec, type ComposeCommand } from '../renderer/src/api/types'
+import { ApiError, type BuildSpec, type ComposeCommand, type LocalClusterTool } from '../renderer/src/api/types'
 import type { Store } from './db'
 import { toApiError, type Engine } from './engine/engine'
 import * as migrate from './migrate/migrate'
@@ -11,12 +11,15 @@ import * as resources from './tools/resources'
 import * as kube from './k8s/kube'
 import * as podTools from './k8s/pod-tools'
 import * as kubeMore from './k8s/resources'
+import * as helm from './k8s/helm'
+import * as localClusters from './k8s/local-clusters'
 import { settingValue } from './settings-schema'
 import * as updates from './updates'
 import type { PipeShare } from './tools/windows-tools'
 import { repairSocket } from './engine/wsl'
 import * as registries from './engine/registries'
 import * as build from './engine/build'
+import * as engines from './engine/engines'
 import * as composeFiles from './engine/compose-files'
 
 // The IPC surface from architecture.md ("API"). Three channels:
@@ -68,6 +71,7 @@ export function registerIpc(deps: IpcDeps) {
   const builds = new Map<string, () => void>()
   const composeRuns = new Map<string, () => void>()
   const scans = new Map<string, () => void>()
+  const clusterRuns = new Map<string, () => void>()
   const composeCtx = async () => ({ docker: build.findDockerCli(), host: build.cliHost(engine.currentEndpoint), containers: await engine.rawContainers().catch(() => []) })
 
   const routes: Record<string, Route> = {
@@ -121,6 +125,20 @@ export function registerIpc(deps: IpcDeps) {
     'kube.list': { args: z.tuple([kubeName, kubeName, kubeKind]), run: ([c, n, k]) => kubeMore.list(c, n, k) },
     'kube.yaml': { args: z.tuple([kubeName, z.enum(['pods', 'deployments', 'services', 'statefulsets', 'jobs', 'cronjobs', 'ingresses', 'configmaps', 'secrets']), kubeName, kubeName]), run: ([c, k, n, name]) => kubeMore.yaml(c, k, n, name) },
     'kube.events': { args: z.tuple([kubeName, kubeName]), run: ([c, n]) => kubeMore.events(c, n) },
+    'engine.options': { args: z.tuple([]), run: () => engines.options(engine.engineChoice) },
+    'engine.use': {
+      args: z.tuple([settingValue.engine_choice]),
+      run: async ([c]) => {
+        store.setSetting('engine_choice', c)
+        return engine.useEngine(c)
+      },
+    },
+    'kube.localClusters': { args: z.tuple([]), run: async () => ({ tools: localClusters.tools(), clusters: await localClusters.list(build.cliHost(engine.currentEndpoint)) }) },
+    'kube.cancelLocalCluster': { args: z.tuple([id]), run: ([r]) => void clusterRuns.get(r)?.() },
+    'kube.helmReleases': { args: z.tuple([kubeName, kubeName]), run: ([c, n]) => helm.releases(c, n) },
+    'kube.helmHistory': { args: z.tuple([kubeName, kubeName, kubeName]), run: ([c, n, name]) => helm.history(c, n, name) },
+    'kube.helmValues': { args: z.tuple([kubeName, kubeName, kubeName, z.number().int().min(1)]), run: ([c, n, name, r]) => helm.values(c, n, name, r) },
+    'kube.helmRollback': { args: z.tuple([kubeName, kubeName, kubeName, z.number().int().min(1)]), run: ([c, n, name, r]) => helm.rollback(c, n, name, r) },
     'kube.rollouts': { args: z.tuple([kubeName, kubeName, kubeName]), run: ([c, n, name]) => kubeMore.rollouts(c, n, name) },
     'kube.usage': { args: z.tuple([kubeName, kubeName]), run: ([c, n]) => kubeMore.podUsage(c, n) },
     'kube.data': { args: z.tuple([kubeName, kubeName, z.enum(['configmaps', 'secrets']), kubeName]), run: ([c, n, k, name]) => kubeMore.data(c, n, k, name) },
@@ -386,6 +404,7 @@ export function registerIpc(deps: IpcDeps) {
     migrate: z.tuple([distro, z.array(z.string().max(300)).max(2000), z.object({ start: z.boolean() })]),
     pull: z.tuple([z.string().regex(/^[a-z0-9][a-z0-9._\/:@-]{0,255}$/i, 'That isn’t a valid image reference.')]),
     push: z.tuple([imageRef]),
+    localCluster: z.tuple([z.enum(['kind', 'k3d', 'minikube']), z.enum(['create', 'remove']), z.string().regex(/^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/, 'Use lower-case letters, digits and dashes, up to 32 characters.')]),
     scan: z.tuple([z.string().regex(/^[a-z0-9][a-z0-9._\/:@-]{0,255}$/i, 'That isn’t a valid image reference.')]),
     compose: z.tuple([filePath, z.enum(['up', 'down', 'pull', 'build', 'restart', 'stop']), z.string().regex(/^[a-zA-Z0-9._-]+$/).max(128).nullable()]),
     build: z.tuple([
@@ -525,6 +544,28 @@ export function registerIpc(deps: IpcDeps) {
             )
             .finally(() => {
               scans.delete(subId)
+              subs.delete(subId)
+            })
+          break
+        }
+        case 'localCluster': {
+          const [tool, action, name] = a as [LocalClusterTool, 'create' | 'remove', string]
+          const r = localClusters.command(tool, action, name, build.cliHost(engine.currentEndpoint), (lines) => to({ type: 'lines', lines }))
+          clusterRuns.set(subId, r.cancel)
+          stop = r.cancel
+          r.done
+            .then(
+              () => {
+                notify({ kind: 'success', title: action === 'create' ? `Created the ${tool} cluster ${name}` : `Deleted the ${tool} cluster ${name}` })
+                to({ type: 'done' })
+              },
+              (err) => {
+                const ae = toApiError(err)
+                to({ type: 'error', message: ae.message, status: ae.status })
+              },
+            )
+            .finally(() => {
+              clusterRuns.delete(subId)
               subs.delete(subId)
             })
           break

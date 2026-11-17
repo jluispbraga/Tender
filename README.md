@@ -101,6 +101,13 @@ On Linux, make the AppImage executable first: `chmod +x Tender-*.AppImage`.
 - Open an interactive terminal session inside a container.
 - Inspect ports, mounts, environment variables, labels, and container details.
 - Group and operate Docker Compose projects.
+- Browse a container's files, download and upload them, and see what changed against its image.
+- Share a port with a temporary public https link (Cloudflare Quick Tunnel, no account), closed when Tender quits.
+
+### Compose
+- Open a `compose.yaml`, or find it from a running project.
+- Up, down, stop, restart, pull and build the whole project or one service, with the command's output.
+- Edit the project's `.env`.
 
 ### Images
 - Browse and inspect local images, tags, layers, and metadata.
@@ -108,11 +115,15 @@ On Linux, make the AppImage executable first: `chmod +x Tender-*.AppImage`.
 - Create containers from images, with port mappings, volume mounts, and environment variables.
 - See which images are in use, unused, or dangling.
 - Remove images and prune dangling or unused images, with the reclaimable disk space shown first.
+- Build from a Dockerfile (BuildKit, `.dockerignore`), with live steps and log, cancel and build again.
+- Tag and push, with registry logins checked first and kept encrypted (Settings › Registries).
+- Scan for known vulnerabilities with Trivy, run in a container on your engine: filter by severity or by fix.
 
 ### Volumes
 - List and inspect named volumes and their container usage.
 - Create and remove volumes.
 - See which containers use a volume before deleting it.
+- Remove unused volumes, back a volume up to `.tar.gz`, restore it, or create a volume from a backup.
 
 ### Networks
 - List networks with their driver, subnet and the containers on each.
@@ -121,14 +132,17 @@ On Linux, make the AppImage executable first: `chmod +x Tender-*.AppImage`.
 - Remove unused networks; built-in networks and networks in use are kept.
 
 ### Beyond Docker Desktop
-- **Kubernetes:** pods, deployments, services, StatefulSets, jobs, CronJobs, ingresses, ConfigMaps and secrets (key names only) for every context in your kubeconfig (kind, k3d, minikube, any cluster kubectl reaches). Filter by name or show only what is down, the namespace's events, CPU and memory per pod (with metrics-server), view any resource's YAML, rollout history with rollback, live logs you can search and save (a pod's, a job's, or all pods of a deployment at once), pod details and events, a terminal in a pod, and port forwards that come back when Tender opens. Restart or scale a deployment or StatefulSet, run or pause a CronJob, delete anything; deletes always ask first and name the context, and production clusters ask before every change.
+- **Kubernetes:** pods, deployments, services, StatefulSets, jobs, CronJobs, ingresses, ConfigMaps and secrets (key names only) for every context in your kubeconfig (kind, k3d, minikube, any cluster kubectl reaches). Filter by name or show only what is down, the namespace's events, CPU and memory per pod (with metrics-server), view any resource's YAML, rollout history with rollback, live logs you can search and save (a pod's, a job's, or all pods of a deployment at once), pod details and events, a terminal in a pod, and port forwards that come back when Tender opens. Restart or scale a deployment or StatefulSet, run or pause a CronJob, delete anything; deletes always ask first and name the context, and production clusters ask before every change. Helm releases with their history and values (credentials masked) and rollback, and local clusters made with kind, k3d or minikube.
 - **Debug shell:** a BusyBox shell that joins a running container's processes and network, for images with no shell of their own (distroless, scratch). The container is not changed.
 - **Checkup:** WSL, the engine, DNS and Windows tools checked in one place, each problem with its fix.
 - **Memory and disk (Windows):** what WSL holds, memory reclaim and a cap, sparse virtual disks that give space back, build cache.
 
 ### Desktop experience
 - Light, dark, and system theme options.
-- System-tray integration and configurable startup behaviour.
+- System-tray integration and configurable startup behaviour, with each container's start, stop, logs and ports in the tray.
+- Alerts when a container runs out of memory or keeps restarting, and when WSL holds disk space Docker no longer uses.
+- Quick search (Ctrl K) for containers, images, volumes and networks, and for actions like Stop, Restart, Logs or Open localhost:port.
+- Choose the engine: automatic, a WSL distribution, a Docker context, or an `ssh://` or `tcp://` address.
 - Persistent preferences, recent items, notifications, and table-column visibility.
 - Engine connection status, a reconnect action, and troubleshooting guidance.
 - Update checks against GitHub Releases.

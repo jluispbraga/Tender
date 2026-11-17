@@ -101,6 +101,13 @@ No Linux, torne o AppImage executável antes: `chmod +x Tender-*.AppImage`.
 - Abrir uma sessão de terminal interativa dentro de um container.
 - Inspecionar portas, mounts, variáveis de ambiente, labels e detalhes do container.
 - Agrupar e operar projetos Docker Compose.
+- Navegar pelos arquivos de um container, baixar e enviar arquivos e ver o que mudou em relação à imagem.
+- Compartilhar uma porta com um link público https temporário (Cloudflare Quick Tunnel, sem conta), que fecha quando o Tender sai.
+
+### Compose
+- Abrir um `compose.yaml`, ou encontrá-lo a partir de um projeto em execução.
+- Up, down, stop, restart, pull e build do projeto inteiro ou de um serviço, com a saída do comando.
+- Editar o `.env` do projeto.
 
 ### Imagens
 - Navegar e inspecionar imagens locais, tags, camadas e metadados.
@@ -108,11 +115,15 @@ No Linux, torne o AppImage executável antes: `chmod +x Tender-*.AppImage`.
 - Criar containers a partir de imagens, com mapeamento de portas, volumes e variáveis de ambiente.
 - Ver quais imagens estão em uso, sem uso ou órfãs (dangling).
 - Remover imagens e fazer prune das órfãs ou sem uso, vendo antes o espaço em disco que será liberado.
+- Build a partir de um Dockerfile (BuildKit, `.dockerignore`), com etapas e log ao vivo, cancelar e buildar de novo.
+- Tag e push, com logins de registry verificados antes e guardados cifrados (Settings › Registries).
+- Scan de vulnerabilidades conhecidas com o Trivy, rodando num container no seu engine: filtre por gravidade ou por correção.
 
 ### Volumes
 - Listar e inspecionar volumes nomeados e quais containers os usam.
 - Criar e remover volumes.
 - Ver quais containers usam um volume antes de apagá-lo.
+- Remover volumes sem uso, fazer backup de um volume em `.tar.gz`, restaurá-lo ou criar um volume a partir de um backup.
 
 ### Networks
 - Listar as redes com driver, subnet e os containers de cada uma.
@@ -121,14 +132,17 @@ No Linux, torne o AppImage executável antes: `chmod +x Tender-*.AppImage`.
 - Remover redes sem uso; as redes nativas do Docker e as que estão em uso são mantidas.
 
 ### Além do Docker Desktop
-- **Kubernetes:** pods, deployments, services, StatefulSets, jobs, CronJobs, ingresses, ConfigMaps e secrets (só os nomes das chaves) para todo contexto do seu kubeconfig (kind, k3d, minikube, qualquer cluster que o kubectl alcance). Filtre por nome ou mostre só o que está fora do ar, os eventos do namespace, CPU e memória por pod (com metrics-server), o YAML de qualquer recurso, o histórico de rollouts com rollback, logs ao vivo que você pode buscar e salvar (de um pod, de um job ou de todos os pods de um deployment de uma vez), detalhes e eventos do pod, um terminal no pod e port forwards que voltam quando o Tender abre. Reinicie ou escale um deployment ou StatefulSet, rode ou pause um CronJob, apague qualquer coisa; exclusões sempre pedem confirmação e mostram o contexto, e clusters de produção pedem confirmação antes de toda mudança.
+- **Kubernetes:** pods, deployments, services, StatefulSets, jobs, CronJobs, ingresses, ConfigMaps e secrets (só os nomes das chaves) para todo contexto do seu kubeconfig (kind, k3d, minikube, qualquer cluster que o kubectl alcance). Filtre por nome ou mostre só o que está fora do ar, os eventos do namespace, CPU e memória por pod (com metrics-server), o YAML de qualquer recurso, o histórico de rollouts com rollback, logs ao vivo que você pode buscar e salvar (de um pod, de um job ou de todos os pods de um deployment de uma vez), detalhes e eventos do pod, um terminal no pod e port forwards que voltam quando o Tender abre. Reinicie ou escale um deployment ou StatefulSet, rode ou pause um CronJob, apague qualquer coisa; exclusões sempre pedem confirmação e mostram o contexto, e clusters de produção pedem confirmação antes de toda mudança. Releases do Helm com histórico e values (credenciais mascaradas) e rollback, e clusters locais criados com kind, k3d ou minikube.
 - **Debug shell:** um shell BusyBox que entra nos processos e na rede de um container em execução, para imagens sem shell próprio (distroless, scratch). O container não é alterado.
 - **Checkup:** WSL, engine, DNS e ferramentas do Windows verificados num só lugar, cada problema com sua correção.
 - **Memória e disco (Windows):** o que o WSL está ocupando, recuperação de memória e um limite, discos virtuais esparsos que devolvem espaço, cache de build.
 
 ### Experiência desktop
 - Temas claro, escuro e do sistema.
-- Integração com a bandeja do sistema e comportamento de inicialização configurável.
+- Integração com a bandeja do sistema e comportamento de inicialização configurável, com start, stop, logs e portas de cada container na bandeja.
+- Alertas quando um container fica sem memória ou reinicia em loop, e quando o WSL ocupa espaço em disco que o Docker já não usa.
+- Busca rápida (Ctrl K) por containers, imagens, volumes e redes, e por ações como Stop, Restart, Logs ou Open localhost:porta.
+- Escolha do engine: automático, uma distribuição WSL, um contexto Docker ou um endereço `ssh://` ou `tcp://`.
 - Preferências persistentes, itens recentes, notificações e visibilidade das colunas das tabelas.
 - Status da conexão com o engine, ação de reconectar e orientações para resolver problemas.
 - Verificação de atualizações no GitHub Releases.

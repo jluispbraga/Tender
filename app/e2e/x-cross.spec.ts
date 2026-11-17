@@ -23,7 +23,7 @@ test.describe('cross-cutting', () => {
       await page.waitForTimeout(300)
       const overflow = await page.evaluate(() => [...document.querySelectorAll('main *')].some((el) => el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflowX !== 'hidden' && el.tagName === 'DIV' && getComputedStyle(el).overflowX !== 'visible'))
       expect(overflow, `horizontal scroll on ${hash}`).toBe(false)
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `page wider than the window on ${hash}`).toBe(true)
     }
   })
 

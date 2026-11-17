@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { validChoice } from './engine/engine-choice'
 import type { Settings } from '../renderer/src/api/types'
 
 // What settings.set accepts, key by key. Kept apart from ipc.ts (which needs
@@ -13,6 +14,7 @@ export const settingValue = {
   tray_enabled: z.boolean(),
   share_docker_pipe: z.boolean(),
   check_updates: z.boolean(),
+  engine_choice: z.string().max(500).refine(validChoice, 'Use an address like tcp://host:2375, ssh://user@host, unix:///path or npipe:////./pipe/name.'),
   alerts: z.boolean(),
   kube_sources: z.array(z.string().min(1).max(1000)).max(50),
   kube_labels: z

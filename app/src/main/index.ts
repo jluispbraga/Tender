@@ -191,6 +191,7 @@ function onSettingChanged(key: string, value: unknown) {
   if (key === 'check_updates') startUpdates(value === true)
   if (key === 'kube_sources') setKubeSources(value as string[])
   if (key === 'theme') nativeTheme.themeSource = value as 'system' | 'light' | 'dark'
+  if (key === 'engine_choice' && value !== engine.engineChoice) void engine.useEngine(value as string)
 }
 
 // ---- lifecycle ---------------------------------------------------------------------------------
@@ -242,6 +243,8 @@ app.whenReady().then(() => {
     tray?.setContextMenu(trayMenu())
     void share.sync(store.settings().share_docker_pipe)
   })
+  // The engine chosen in Settings, before the first connection.
+  void engine.useEngine(settings.engine_choice, false)
   engine.start()
 
   createWindow()

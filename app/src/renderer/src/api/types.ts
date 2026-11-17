@@ -344,6 +344,8 @@ export interface Settings {
   share_docker_pipe: boolean
   /** Look for new versions on GitHub and download them in the background. */
   check_updates: boolean
+  /** Which engine to use: 'auto', wsl://Distro, context://name, or an address like tcp://host:2375. */
+  engine_choice: string
   /** Out-of-memory kills, restart loops and unused WSL disk space, as system notifications too. */
   alerts: boolean
   /** Kubeconfig files and folders to read besides ~/.kube/config (or KUBECONFIG). */
@@ -410,6 +412,10 @@ export interface TenderApi {
     restartWsl(): Promise<EngineStatus>
     onStatus(cb: (s: EngineStatus) => void): Unsub
     onEvents(cb: (events: EngineEvent[]) => void): Unsub
+    /** Engines Tender can use: automatic, WSL distributions, Docker contexts, a custom address. */
+    options(): Promise<EngineOption[]>
+    /** Saves the choice and connects to it. */
+    use(choice: string): Promise<EngineStatus>
   }
   containers: {
     list(): Promise<ContainerRow[]>
@@ -568,6 +574,18 @@ export interface TenderApi {
     data(context: string, namespace: string, kind: 'configmaps' | 'secrets', name: string): Promise<KubeData>
     /** Events of one namespace, or all ('*'), newest first. */
     events(context: string, namespace: string): Promise<KubeEvent[]>
+    /** Helm releases (newest revision of each), read from the cluster: no helm binary needed. */
+    helmReleases(context: string, namespace: string): Promise<HelmRelease[]>
+    helmHistory(context: string, namespace: string, name: string): Promise<HelmRevision[]>
+    /** The values set for a revision (credentials masked) and its notes. */
+    helmValues(context: string, namespace: string, name: string, revision: number): Promise<{ values: unknown; notes?: string }>
+    /** kind, k3d and minikube found on PATH, and their clusters. */
+    localClusters(): Promise<{ tools: LocalClusterTool[]; clusters: LocalCluster[] }>
+    /** Creates or deletes a local cluster, streaming the tool's output. */
+    localCluster(tool: LocalClusterTool, action: 'create' | 'remove', name: string, onLines: (lines: string[]) => void): { runId: string; done: Promise<void> }
+    cancelLocalCluster(runId: string): Promise<void>
+    /** helm rollback; needs helm on PATH. */
+    helmRollback(context: string, namespace: string, name: string, revision: number): Promise<string>
     /** A deployment's revisions, newest first. */
     rollouts(context: string, namespace: string, name: string): Promise<KubeRevision[]>
     /** CPU and memory per pod; null when the cluster has no metrics-server. */
@@ -731,6 +749,33 @@ export interface KubeData {
   type?: string
 }
 
+export type LocalClusterTool = 'kind' | 'k3d' | 'minikube'
+
+export interface LocalCluster {
+  tool: LocalClusterTool
+  name: string
+  /** The kubeconfig context the tool writes for it. */
+  context: string
+  running?: boolean
+}
+
+export interface HelmRevision {
+  revision: number
+  /** deployed, superseded, failed, pending-upgrade… as Helm writes it. */
+  status: string
+  /** chart name and version, like nginx-15.4.2 */
+  chart: string
+  appVersion?: string
+  updatedAt?: string
+  description?: string
+}
+
+export interface HelmRelease extends HelmRevision {
+  name: string
+  namespace: string
+  revisions: number
+}
+
 export interface KubeOverview {
   pods: { name: string; namespace: string; status: string; ready: string; restarts: number; node?: string; containers: string[]; /** Declared container ports, for forwarding. */ ports: number[]; createdAt?: string; /** What made it: a Job, ReplicaSet, StatefulSet... */ owner?: { kind: string; name: string } }[]
   deployments: { name: string; namespace: string; ready: string; replicas: number; upToDate: number; images: string[]; createdAt?: string }[]
@@ -785,6 +830,13 @@ export interface DoctorCheck {
 }
 
 // ---- Docker Engine inside WSL -----------------------------------------------------
+
+export interface EngineOption {
+  /** What goes in the engine_choice setting. */
+  choice: string
+  label: string
+  detail: string
+}
 
 export interface WslDistro {
   name: string

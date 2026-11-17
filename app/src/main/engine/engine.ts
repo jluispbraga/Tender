@@ -34,6 +34,7 @@ import { scan } from './scan'
 import * as files from './files'
 import * as tunnels from './tunnels'
 import * as snapshots from './snapshots'
+import { AUTO, endpointFor } from './engines'
 
 // The WSL distribution whose engine answered last, so Tender can boot it after a restart.
 const wslMemo = () => join(app.getPath('userData'), 'wsl-engine')
@@ -88,6 +89,8 @@ function dedupePorts(ports: Docker.Port[]): PortBinding[] {
  */
 export class Engine {
   private docker: Docker | null = null
+  /** 'auto', or the engine chosen in Settings (wsl://…, context://…, an address). */
+  private choice = AUTO
   private endpoint: Endpoint = resolveEndpoint()
   private status: EngineStatus = { state: 'starting', endpoint: this.endpoint.address }
   private pingTimer: NodeJS.Timeout | undefined
@@ -133,6 +136,17 @@ export class Engine {
   onContainerSignal(fn: Listener<{ kind: 'oom' | 'die'; id: string; name: string; exitCode: number; expected: boolean }>) {
     this.signalListeners.add(fn)
     return () => void this.signalListeners.delete(fn)
+  }
+
+  /** Uses another engine: 'auto', wsl://Distro, context://name or an address. Reconnects unless told not to. */
+  async useEngine(choice: string, reconnect = true): Promise<EngineStatus> {
+    this.choice = choice || AUTO
+    this.endpoint = endpointFor(this.choice)
+    return reconnect ? this.reconnect() : this.status
+  }
+
+  get engineChoice() {
+    return this.choice
   }
 
   get currentEndpoint() {
@@ -184,6 +198,14 @@ export class Engine {
    * distribution and bridge to it. An explicit DOCKER_HOST is never second-guessed.
    */
   private async discoverWsl() {
+    // A distribution chosen in Settings: bridge to it, no searching.
+    if (process.platform === 'win32' && this.endpoint.address.startsWith('wsl://') && !this.endpoint.socketPath) {
+      this.bridge = await WslBridge.open(this.endpoint.address.slice('wsl://'.length))
+      this.endpoint = { ...this.endpoint, socketPath: this.bridge.pipe }
+      return
+    }
+    // Only Automatic falls back to WSL; an engine the person picked is never second-guessed.
+    if (this.choice !== AUTO) return
     if (process.platform !== 'win32' || this.endpoint.kind !== 'npipe' || this.endpoint.name === 'DOCKER_HOST' || this.endpoint.socketPath) return
     // Dev only: pretend the default pipe is missing, to exercise this path next to Docker Desktop.
     if (this.endpoint.address === WINDOWS_PIPE && !app.isPackaged && process.env.TENDER_DEFAULT_PIPE) this.endpoint = { ...this.endpoint, address: `npipe:////./pipe/${process.env.TENDER_DEFAULT_PIPE}` }
@@ -245,7 +267,7 @@ export class Engine {
     this.eventStream = null
     this.docker = null
     this.closeBridge()
-    this.endpoint = resolveEndpoint()
+    this.endpoint = endpointFor(this.choice)
     this.setStatus({ state: 'starting', endpoint: this.endpoint.address })
     await this.connect()
     return this.status
@@ -295,7 +317,7 @@ export class Engine {
       // The distribution went away: drop the bridge so the next try looks again from the start.
       if (this.bridge) {
         this.closeBridge()
-        this.endpoint = resolveEndpoint()
+        this.endpoint = endpointFor(this.choice)
       }
       // 2 s, 4 s, 8 s, then every 10 s while unreachable.
       this.schedulePing(Math.min(10_000, 1000 * 2 ** this.failures))

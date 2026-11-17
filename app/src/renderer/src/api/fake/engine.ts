@@ -26,6 +26,8 @@ import {
   type Severity,
   type FileEntry,
   type Tunnel,
+  type LocalCluster,
+  type LocalClusterTool,
   type Vulnerability,
   type ComposeService,
   type NetworkRow,
@@ -56,6 +58,23 @@ export function createFakeApi(): TenderApi {
   const addresses = new Map<string, string>()
   const logins = new Map<string, RegistryLogin>()
   const uploaded = new Map<string, string[]>()
+  let localClusters: LocalCluster[] = [{ tool: 'kind', name: 'dev', context: 'kind-dev' }]
+  const helmRels = [
+    {
+      name: 'web',
+      namespace: 'shop',
+      history: [
+        { revision: 3, status: 'deployed', chart: 'nginx-15.4.2', appVersion: '1.27.2', updatedAt: new Date(Date.now() - 2 * 3600_000).toISOString(), description: 'Upgrade complete' },
+        { revision: 2, status: 'superseded', chart: 'nginx-15.4.1', appVersion: '1.27.1', updatedAt: new Date(Date.now() - 3 * 86400_000).toISOString(), description: 'Upgrade complete' },
+        { revision: 1, status: 'superseded', chart: 'nginx-15.4.0', appVersion: '1.27.0', updatedAt: new Date(Date.now() - 9 * 86400_000).toISOString(), description: 'Install complete' },
+      ],
+    },
+    {
+      name: 'cache',
+      namespace: 'shop',
+      history: [{ revision: 1, status: 'failed', chart: 'redis-19.6.0', appVersion: '7.2.5', updatedAt: new Date(Date.now() - 40 * 60_000).toISOString(), description: 'Release "cache" failed: timed out waiting for the condition' }],
+    },
+  ]
   let tunnels: Tunnel[] = []
   // Compose files the fake knows: what `docker compose config` would print for each.
   type FakeService = { image?: string; build?: boolean; ports: string[]; command: string }
@@ -129,6 +148,7 @@ export function createFakeApi(): TenderApi {
     tray_enabled: true,
     share_docker_pipe: true,
     check_updates: true,
+    engine_choice: 'auto',
     alerts: true,
     kube_sources: [],
     kube_labels: {},
@@ -533,6 +553,62 @@ export function createFakeApi(): TenderApi {
         }
         return items[kind].filter((x) => (ns === '*' || x.namespace === ns) && !fakeKubeDeleted.has(x.name))
       },
+      async localClusters() {
+        await sleep(150)
+        return { tools: ['kind', 'k3d'] as LocalClusterTool[], clusters: structuredClone(localClusters) }
+      },
+      localCluster(tool, action, name, onLines) {
+        const runId = rid()
+        let cancelled = false
+        pulls.set(runId, { cancel: () => (cancelled = true) })
+        const done = (async () => {
+          try {
+            const steps =
+              action === 'create'
+                ? [`Creating cluster "${name}" ...`, ' • Ensuring node image (kindest/node:v1.31.0) 🖼', ' • Preparing nodes 📦', ' • Writing configuration 📜', ' • Starting control-plane 🕹️', ` Set kubectl context to "${tool}-${name}"`]
+                : [`Deleting cluster "${name}" ...`, `Deleted nodes: ["${name}-control-plane"]`]
+            for (const l of steps) {
+              await sleep(200)
+              if (cancelled) throw new ApiError('Stopped.', 499)
+              onLines([l])
+            }
+            if (action === 'create') {
+              if (localClusters.some((c) => c.tool === tool && c.name === name)) throw new ApiError(`node(s) already exist for a cluster with the name "${name}"`, 422)
+              localClusters.push({ tool, name, context: tool === 'minikube' ? name : `${tool}-${name}`, running: tool === 'kind' ? undefined : true })
+            } else localClusters = localClusters.filter((c) => !(c.tool === tool && c.name === name))
+          } finally {
+            pulls.delete(runId)
+          }
+        })()
+        return { runId, done }
+      },
+      async cancelLocalCluster(runId) {
+        pulls.get(runId)?.cancel()
+      },
+      async helmReleases(_c, ns) {
+        await sleep(120)
+        const all = helmRels.map((r) => ({ ...r.history[0], name: r.name, namespace: r.namespace, revisions: r.history.length }))
+        return ns === '*' ? all : all.filter((r) => r.namespace === ns)
+      },
+      async helmHistory(_c, ns, name) {
+        await sleep(100)
+        return structuredClone(helmRels.find((r) => r.namespace === ns && r.name === name)?.history ?? [])
+      },
+      async helmValues(_c, ns, name, rev) {
+        await sleep(100)
+        const r = helmRels.find((x) => x.namespace === ns && x.name === name)
+        if (!r?.history.some((h) => h.revision === rev)) throw new ApiError(`Revision ${rev} of ${name} isn’t there any more.`, 404)
+        return { values: { replicaCount: rev > 2 ? 3 : 2, image: { tag: rev > 2 ? '1.27.2' : '1.27.1' }, auth: { enabled: true, password: '••••' } }, notes: 'Get the URL with: kubectl get svc web-nginx' }
+      },
+      async helmRollback(_c, ns, name, rev) {
+        await sleep(600)
+        const r = helmRels.find((x) => x.namespace === ns && x.name === name)
+        const from = r?.history.find((h) => h.revision === rev)
+        if (!r || !from) throw new ApiError(`Revision ${rev} of ${name} isn’t there any more.`, 404)
+        for (const h of r.history) if (h.status === 'deployed') h.status = 'superseded'
+        r.history.unshift({ ...from, revision: r.history[0].revision + 1, status: 'deployed', updatedAt: now(), description: `Rollback to ${rev}` })
+        return `Rolled ${name} back to revision ${rev}.`
+      },
       async events(_c, ns) {
         await sleep(120)
         const ago = (m: number) => new Date(Date.now() - m * 60_000).toISOString()
@@ -722,6 +798,22 @@ export function createFakeApi(): TenderApi {
     },
     platform: /Windows/.test(navigator.userAgent) ? 'win32' : /Mac OS/.test(navigator.userAgent) ? 'darwin' : 'linux',
     engine: {
+      async options() {
+        await up()
+        return [
+          { choice: 'auto', label: 'Automatic', detail: 'Like the Docker CLI: now npipe:////./pipe/docker_engine, with WSL as a fallback on Windows' },
+          { choice: 'wsl://Ubuntu', label: 'WSL: Ubuntu', detail: 'Docker inside this distribution' },
+          { choice: 'context://staging', label: 'Context: staging', detail: 'ssh://deploy@staging.example.internal' },
+          ...(/^(tcp|ssh|unix|npipe):\/\//.test(settings.engine_choice) ? [{ choice: settings.engine_choice, label: 'Custom address', detail: settings.engine_choice }] : []),
+        ]
+      },
+      async use(choice) {
+        await up(300)
+        if (!/^(auto|wsl:\/\/[\w.-]+|context:\/\/[\w.-]+|(tcp|ssh|unix|npipe):\/\/.+)$/.test(choice)) throw new ApiError('Use an address like tcp://host:2375, ssh://user@host, unix:///path or npipe:////./pipe/name.', 400)
+        settings.engine_choice = choice
+        setEngine({ state: 'running', endpoint: choice === 'auto' ? '//./pipe/docker_engine' : choice })
+        return engine
+      },
       async status() {
         await sleep(80)
         return { ...engine, containersRunning: containers.filter((c) => c.state === 'running').length }

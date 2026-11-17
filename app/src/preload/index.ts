@@ -69,6 +69,23 @@ const tender: TenderApi = {
     data: (c, n, k, name) => call('kube.data', c, n, k, name),
     yaml: (c, k, n, name) => call('kube.yaml', c, k, n, name),
     events: (c, n) => call('kube.events', c, n),
+    helmReleases: (c, n) => call('kube.helmReleases', c, n),
+    localClusters: () => call('kube.localClusters'),
+    localCluster: (tool, action, name, onLines) => {
+      let settle: { resolve: () => void; reject: (e: unknown) => void }
+      const done = new Promise<void>((resolve, reject) => (settle = { resolve, reject }))
+      const s = subscribe('localCluster', [tool, action, name], (p: { type: 'lines'; lines: string[] } | { type: 'done' } | { type: 'error'; message: string; status?: number }) => {
+        if (p.type === 'lines') onLines(p.lines)
+        else if (p.type === 'done') (handlers.delete(s.id), settle.resolve())
+        else (handlers.delete(s.id), settle.reject(apiError(p.message, p.status)))
+      })
+      s.ready.catch((e) => settle.reject(e))
+      return { runId: s.id, done }
+    },
+    cancelLocalCluster: (runId) => call('kube.cancelLocalCluster', runId),
+    helmHistory: (c, n, name) => call('kube.helmHistory', c, n, name),
+    helmValues: (c, n, name, r) => call('kube.helmValues', c, n, name, r),
+    helmRollback: (c, n, name, r) => call('kube.helmRollback', c, n, name, r),
     rollouts: (c, n, name) => call('kube.rollouts', c, n, name),
     usage: (c, n) => call('kube.usage', c, n),
     sources: () => call('kube.sources'),
@@ -117,6 +134,8 @@ const tender: TenderApi = {
     reconnect: () => call('engine.reconnect'),
     repairWsl: (distro) => call('engine.repairWsl', distro),
     restartWsl: () => call('engine.restartWsl'),
+    options: () => call('engine.options'),
+    use: (choice) => call('engine.use', choice),
     onStatus: (cb) => quiet(subscribe('status', [], cb)),
     onEvents: (cb) => quiet(subscribe('events', [], cb)),
   },
