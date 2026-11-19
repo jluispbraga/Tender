@@ -96,6 +96,9 @@ export class Engine {
   private pingTimer: NodeJS.Timeout | undefined
   private failures = 0
   private eventStream: Readable | null = null
+  /** When the event stream last delivered anything, and what `docker info` counted at the last ping. */
+  private lastEventAt = 0
+  private lastPing: { at: number; shape: string } | null = null
   private statusListeners = new Set<Listener<EngineStatus>>()
   private eventListeners = new Set<Listener<EngineEvent[]>>()
   private dieListeners = new Set<Listener<{ id: string; name: string; exitCode: number }>>()
@@ -265,6 +268,7 @@ export class Engine {
     clearTimeout(this.pingTimer)
     this.eventStream?.destroy()
     this.eventStream = null
+    this.lastPing = null
     this.docker = null
     this.closeBridge()
     this.endpoint = endpointFor(this.choice)
@@ -303,6 +307,14 @@ export class Engine {
         memTotal: info.MemTotal,
         containersRunning: info.ContainersRunning,
       })
+      // The stream can die without a word (sleep/resume, the engine's backend restarting behind
+      // the pipe): the engine changed since the last ping yet nothing came through, so resubscribe.
+      const shape = `${info.Containers}/${info.ContainersRunning}/${info.ContainersPaused}/${info.Images}`
+      if (this.eventStream && this.lastPing && this.lastPing.shape !== shape && this.lastEventAt < this.lastPing.at) {
+        this.eventStream.destroy()
+        this.eventStream = null
+      }
+      this.lastPing = { at: Date.now(), shape }
       if (!this.eventStream) void this.watchEvents()
       // The engine Tender was told to use is back: prefer it over the WSL stand-in.
       if (this.bridged && this.pipeUp(this.bridged)) void this.reconnect()
@@ -353,8 +365,12 @@ export class Engine {
     try {
       const stream = (await docker.getEvents({ filters: { type: ['container', 'image', 'volume', 'network'] } })) as unknown as Readable
       this.eventStream = stream
+      this.lastEventAt = Date.now()
+      // Whatever happened while no stream was open is lost: have every list refetch once.
+      this.eventListeners.forEach((fn) => fn((['container', 'image', 'volume', 'network'] as const).map((type) => ({ type, action: 'resync', id: '' }))))
       let buf = ''
       stream.on('data', (chunk: Buffer) => {
+        this.lastEventAt = Date.now()
         buf += chunk.toString('utf8')
         const lines = buf.split('\n')
         buf = lines.pop() ?? ''
@@ -391,6 +407,7 @@ export class Engine {
       }
       stream.on('end', restart)
       stream.on('error', restart)
+      stream.on('close', restart)
     } catch {
       setTimeout(() => this.status.state === 'running' && !this.eventStream && void this.watchEvents(), 2000)
     }
