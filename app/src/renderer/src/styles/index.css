@@ -8,6 +8,11 @@
   #root {
     height: 100%;
   }
+  /* The shell scrolls inside its panes; anything that overflows the window must not scroll the whole app. */
+  html,
+  body {
+    overflow: hidden;
+  }
   body {
     background: var(--ds-bg);
     color: var(--ds-text);

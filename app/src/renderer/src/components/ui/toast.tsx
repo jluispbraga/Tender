@@ -56,23 +56,24 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             {/* A div, not Radix's <li role="status">: a list item with a role breaks the list for screen readers. */}
             <div
               className={cn(
-                "flex w-80 items-start gap-2.5 rounded-md border border-line bg-raised p-3 shadow-pop",
+                "flex w-80 max-w-[calc(100vw-2rem)] items-start gap-2.5 rounded-md border border-line bg-raised p-3 shadow-pop",
               )}
             >
-              <span className="pt-0.5">{icons[t.kind]}</span>
-              <div className="flex flex-1 flex-col gap-0.5">
+              <span className="shrink-0 pt-0.5">{icons[t.kind]}</span>
+              {/* min-w-0 + anywhere-wrapping: engine errors carry long unbroken ids that would push the close button out of view. */}
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <RToast.Title className="text-sm font-semibold text-fg">
                   {t.title}
                 </RToast.Title>
                 {t.body && (
-                  <RToast.Description className="text-sm text-muted">
+                  <RToast.Description className="max-h-40 overflow-y-auto text-sm [overflow-wrap:anywhere] whitespace-pre-wrap text-muted">
                     {t.body}
                   </RToast.Description>
                 )}
               </div>
               <RToast.Close
                 aria-label="Dismiss"
-                className="grid size-5 place-items-center rounded-sm text-muted hover:bg-hover hover:text-fg"
+                className="grid size-5 shrink-0 place-items-center rounded-sm text-muted hover:bg-hover hover:text-fg"
               >
                 <X aria-hidden className="size-3.5" />
               </RToast.Close>

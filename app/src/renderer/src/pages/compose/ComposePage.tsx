@@ -23,6 +23,32 @@ const summary = (f: ComposeFile) => {
   return f.error ? 'can’t be read' : !up ? 'down' : up === f.services.length ? 'running' : `${up} of ${f.services.length} running`
 }
 
+const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p
+
+/** Files of the same Compose project side by side, in the order the first one was listed. */
+function groupByProject(files: ComposeFile[]): [string, ComposeFile[]][] {
+  const groups = new Map<string, ComposeFile[]>()
+  for (const f of files) {
+    const key = f.project || fileName(f.path)
+    groups.set(key, [...(groups.get(key) ?? []), f])
+  }
+  return [...groups]
+}
+
+/** One line per file: name, path, then its state. */
+function ComposeRow({ file: f, name, nested }: { file: ComposeFile; name: string; nested?: boolean }) {
+  return (
+    <a href={href('compose', f.path)} className={cn('flex h-8 items-center gap-3 pr-5 text-sm hover:bg-hover', nested ? 'pl-12' : 'pl-5')}>
+      {!nested && <FileStack aria-hidden className="size-4 shrink-0 text-muted" />}
+      <span className="shrink-0 font-medium text-fg">{name}</span>
+      <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted" title={f.path}>
+        {f.path}
+      </span>
+      <span className={cn('shrink-0 text-xs', f.error ? 'text-danger' : 'text-muted')}>{f.error ? 'can’t be read' : `${f.services.length} services · ${summary(f)}`}</span>
+    </a>
+  )
+}
+
 /** Compose files: the ones added here and the ones running projects came from. */
 export function ComposePage({ path }: { path?: string }) {
   return path ? <ComposeDetail path={path} /> : <ComposeList />
@@ -64,20 +90,28 @@ function ComposeList() {
           </p>
         ) : files.data.length ? (
           <ul aria-label="Compose files" className="flex flex-col">
-            {files.data.map((f) => (
-              <li key={f.path} className="border-b border-line">
-                <a href={href('compose', f.path)} className="flex items-center gap-3 px-5 py-2.5 hover:bg-hover">
-                  <FileStack aria-hidden className="size-4 shrink-0 text-muted" />
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate font-medium text-fg">{f.project || fileName(f.path)}</span>
-                    <span className="truncate font-mono text-xs text-muted" title={f.path}>
-                      {f.path}
-                    </span>
-                  </span>
-                  <span className="shrink-0 text-sm text-muted">{f.error ? 'can’t be read' : `${f.services.length} services · ${summary(f)}`}</span>
-                </a>
-              </li>
-            ))}
+            {groupByProject(files.data).map(([project, group]) =>
+              group.length === 1 ? (
+                <li key={group[0].path} className="border-b border-line">
+                  <ComposeRow file={group[0]} name={project} />
+                </li>
+              ) : (
+                <li key={`project:${project}`} className="border-b border-line">
+                  <p className="flex items-center gap-3 px-5 pt-2 pb-0.5">
+                    <FileStack aria-hidden className="size-4 shrink-0 text-muted" />
+                    <span className="truncate font-medium text-fg">{project}</span>
+                    <span className="shrink-0 text-xs text-muted">{group.length} files</span>
+                  </p>
+                  <ul aria-label={`Compose files of ${project}`} className="flex flex-col pb-1">
+                    {group.map((f) => (
+                      <li key={f.path}>
+                        <ComposeRow file={f} name={baseName(f.path)} nested />
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ),
+            )}
           </ul>
         ) : (
           <EmptyState
