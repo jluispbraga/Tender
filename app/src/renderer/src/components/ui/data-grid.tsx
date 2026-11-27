@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
+import { Fragment, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import * as RPopover from '@radix-ui/react-popover'
 import {
   flexRender,
@@ -58,6 +58,14 @@ export function DataGrid<T>(p: DataGridProps<T>) {
       writeCollapsed(p.label, next)
       return next
     })
+  // Column widths the person dragged, kept per table. Empty = the default layout.
+  const [widths, setWidthsState] = useState<Record<string, number>>(() => readWidths(p.label))
+  const setWidths = (next: Record<string, number>) => {
+    setWidthsState(next)
+    writeWidths(p.label, next)
+  }
+  const headerCells = useRef(new Map<string, HTMLTableCellElement>())
+  const resizing = !!Object.keys(widths).length
   const grouped = !Array.isArray(p.data)
   const flat = useMemo(
     () => (Array.isArray(p.data) ? p.data : [...p.data.groups.flatMap((g) => g.rows), ...p.data.ungrouped]),
@@ -86,6 +94,36 @@ export function DataGrid<T>(p: DataGridProps<T>) {
 
   const rows = table.getRowModel().rows
   const visibleCols = table.getVisibleLeafColumns().length + 2
+  const visibleIds = table.getVisibleLeafColumns().map((c) => c.id)
+  /** Width of a column as rendered now, or the one the person chose. */
+  const widthOf = (id: string) => widths[id] ?? Math.round(headerCells.current.get(id)?.getBoundingClientRect().width ?? MIN_WIDTH * 2)
+  /** First resize freezes every visible column at its current width, so only the dragged one changes. */
+  const resize = (id: string, width: number) => {
+    const next = Object.fromEntries(visibleIds.map((c) => [c, widthOf(c)]))
+    next[id] = Math.max(MIN_WIDTH, Math.round(width))
+    setWidths({ ...widths, ...next })
+  }
+  const startDrag = (id: string, e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const handle = e.currentTarget
+    const startX = e.clientX
+    const startW = widthOf(id)
+    handle.setPointerCapture(e.pointerId)
+    const move = (ev: PointerEvent) => resize(id, startW + ev.clientX - startX)
+    const up = () => {
+      handle.removeEventListener('pointermove', move)
+      handle.removeEventListener('pointerup', up)
+      handle.removeEventListener('pointercancel', up)
+      document.body.style.cursor = ''
+    }
+    document.body.style.cursor = 'col-resize'
+    handle.addEventListener('pointermove', move)
+    handle.addEventListener('pointerup', up)
+    handle.addEventListener('pointercancel', up)
+  }
+  // Fixed layout makes the table at least as wide as its columns; past the pane it scrolls sideways.
+  const tableWidth = resizing ? CHECK_COL + ACTIONS_COL + visibleIds.reduce((sum, id) => sum + (widths[id] ?? NEW_COL), 0) : undefined
   const allSelected = table.getIsAllRowsSelected()
   const someSelected = table.getIsSomeRowsSelected()
 
@@ -144,7 +182,11 @@ export function DataGrid<T>(p: DataGridProps<T>) {
     // `relative`: absolutely positioned bits inside rows (sr-only live regions,
     // Radix's hidden inputs) must be laid out against the table, not the page.
     // Otherwise every row below the fold makes the whole window scroll too.
-    <table aria-label={p.label} className="relative w-full table-fixed border-collapse">
+    <table
+      aria-label={p.label}
+      style={tableWidth ? { width: tableWidth, minWidth: '100%' } : undefined}
+      className={cn('relative table-fixed border-collapse', !resizing && 'w-full')}
+    >
       <thead className="sticky top-0 z-10 bg-surface">
         <tr className="h-8 border-b border-line text-left">
           <th className="w-10 pl-4">
@@ -156,12 +198,15 @@ export function DataGrid<T>(p: DataGridProps<T>) {
           </th>
           {table.getFlatHeaders().map((h) => {
             const dir = h.column.getIsSorted()
+            const width = resizing ? (widths[h.id] ?? NEW_COL) : h.column.columnDef.size || undefined
+            const name = typeof h.column.columnDef.header === 'string' ? h.column.columnDef.header : h.id
             return (
               <th
                 key={h.id}
+                ref={(el) => void (el ? headerCells.current.set(h.id, el) : headerCells.current.delete(h.id))}
                 aria-sort={dir === 'asc' ? 'ascending' : dir === 'desc' ? 'descending' : undefined}
-                style={h.column.columnDef.size ? { width: h.column.columnDef.size } : undefined}
-                className="px-3 text-xs font-medium text-muted"
+                style={width ? { width } : undefined}
+                className="group/th relative truncate px-3 text-xs font-medium text-muted"
               >
                 {h.column.getCanSort() ? (
                   <button type="button" onClick={h.column.getToggleSortingHandler()} className="inline-flex items-center gap-1 rounded-sm hover:text-fg">
@@ -171,10 +216,33 @@ export function DataGrid<T>(p: DataGridProps<T>) {
                 ) : (
                   flexRender(h.column.columnDef.header, h.getContext())
                 )}
+                {/* Drag the edge to resize; arrows do it from the keyboard; double-click goes back to the default layout. */}
+                <div
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label={`Resize ${name}`}
+                  aria-valuenow={widths[h.id] ?? (h.column.columnDef.size || NEW_COL)}
+                  aria-valuemin={MIN_WIDTH}
+                  tabIndex={0}
+                  title="Drag to resize · double-click to reset"
+                  onPointerDown={(e) => startDrag(h.id, e)}
+                  onDoubleClick={() => setWidths({})}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                      e.preventDefault()
+                      resize(h.id, widthOf(h.id) + (e.key === 'ArrowRight' ? 16 : -16))
+                    }
+                  }}
+                  className="absolute top-0 right-0 z-10 flex h-full w-2 cursor-col-resize touch-none justify-center outline-none"
+                >
+                  <span className="h-full w-px bg-line-strong opacity-0 transition-opacity group-hover/th:opacity-100 hover:bg-focus group-focus-visible/th:opacity-100" />
+                </div>
               </th>
             )
           })}
-          <th className="w-24 pr-3">
+          {/* Once columns are sized by hand, this one takes whatever is left so the others stay put. */}
+          <th className={cn('pr-3', !resizing && 'w-24')}>
             <span className="sr-only">Actions</span>
           </th>
         </tr>
@@ -267,6 +335,33 @@ export function BulkBar({ count, noun, children, onClear, note }: { count: numbe
       <Button variant="ghost" size="sm" iconOnly aria-label="Clear selection" icon={<X />} onClick={onClear} />
     </div>
   )
+}
+
+/** Narrowest a dragged column gets; a column shown after resizing starts at NEW_COL. */
+const MIN_WIDTH = 48
+const NEW_COL = 120
+/** The checkbox and row-actions columns (w-10, w-24), which never resize. */
+const CHECK_COL = 40
+const ACTIONS_COL = 96
+
+const widthsKey = (label: string) => `tender.grid.widths.${label}`
+
+function readWidths(label: string): Record<string, number> {
+  try {
+    const v = JSON.parse(localStorage.getItem(widthsKey(label)) ?? '{}')
+    return v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([, w]) => typeof w === 'number' && w >= MIN_WIDTH)) as Record<string, number> : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeWidths(label: string, value: Record<string, number>) {
+  try {
+    if (Object.keys(value).length) localStorage.setItem(widthsKey(label), JSON.stringify(value))
+    else localStorage.removeItem(widthsKey(label))
+  } catch {
+    // Storage blocked or full: the widths still apply for this visit.
+  }
 }
 
 const collapsedKey = (label: string) => `tender.grid.collapsed.${label}`
